@@ -27,6 +27,16 @@ jobs:
 
       - run: flutter pub get
 
+      - name: Verify Supabase secrets
+        env:
+          SUPABASE_URL: ${{ secrets.HOSPMASTER_SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.HOSPMASTER_SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_KEY" ]; then
+            echo "::error::Add repository secrets HOSPMASTER_SUPABASE_URL and HOSPMASTER_SUPABASE_PUBLISHABLE_KEY (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+
       - name: Build web
         run: >
           flutter build web --release
