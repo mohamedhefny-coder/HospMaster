@@ -687,8 +687,8 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
             SizedBox(
               width: wide ? 280 : double.infinity,
               child: _managerCard(
-                title: 'Hospital Manager',
-                arabicTitle: 'إدارة المستشفى',
+                title: 'Hospitals Manager',
+                arabicTitle: 'إدارة المستشفيات',
                 arabicDescription: 'الأقسام، الأسرة، الأطباء والعمليات اليومية',
                 description: 'Departments, beds, doctors, and daily operations',
                 icon: Icons.local_hospital_outlined,
@@ -857,7 +857,7 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
           onPressed: () => setState(() => _tab = AppTab.hospitalManager),
           icon: const Icon(Icons.arrow_back, size: 18),
           label: Text(
-            tr('العودة إلى إدارة المستشفى', 'Back to Hospital Manager'),
+            tr('العودة إلى إدارة المستشفيات', 'Back to Hospitals Manager'),
           ),
           style: TextButton.styleFrom(
             alignment: AlignmentDirectional.centerStart,
@@ -924,7 +924,7 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
           onPressed: () => setState(() => _tab = AppTab.hospitalManager),
           icon: const Icon(Icons.arrow_back, size: 18),
           label: Text(
-            tr('العودة إلى إدارة المستشفى', 'Back to Hospital Manager'),
+            tr('العودة إلى إدارة المستشفيات', 'Back to Hospitals Manager'),
           ),
           style: TextButton.styleFrom(
             alignment: AlignmentDirectional.centerStart,
