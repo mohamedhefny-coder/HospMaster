@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:hospmaster/auth/account_button.dart';
+import 'package:hospmaster/auth/admin_access_page.dart';
 import 'package:hospmaster/auth/mode_selection_page.dart';
+import 'package:hospmaster/auth/service_access.dart';
 import 'package:hospmaster/clinic/obgyn_patient_form_page.dart';
 import 'package:hospmaster/clinic/pediatric_patient_form_page.dart';
 import 'package:hospmaster/parameters/medical_formulas_page.dart';
+import 'package:hospmaster/surgery/admin_access.dart';
 import 'package:hospmaster/surgery/oncology_surgery_page.dart';
 import 'package:hospmaster/surgery/patient_follow_up_sheet_page.dart';
 import 'package:hospmaster/surgery/surgery_department_page.dart';
 import 'package:hospmaster/surgery/supabase_config.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,6 +21,7 @@ Future<void> main() async {
 
 const navy = Color(0xFF102A43);
 const teal = Color(0xFF1585A6);
+const _englishFontFamily = 'Tinos';
 
 enum AppTab {
   overview,
@@ -68,19 +73,25 @@ class HospMasterApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: teal),
         scaffoldBackgroundColor: const Color(0xFFF7FAFC),
         useMaterial3: true,
-        fontFamily: 'Arial',
+        fontFamily: _englishFontFamily,
+        fontFamilyFallback: const ['Arial'],
       ),
       home: ModeSelectionPage(
-        dashboardBuilder: (_, isGuest) => HospitalDashboard(isGuest: isGuest),
+        dashboardBuilder: (_, isGuest, services) =>
+            HospitalDashboard(isGuest: isGuest, services: services),
       ),
     );
   }
 }
 
 class HospitalDashboard extends StatefulWidget {
-  const HospitalDashboard({super.key, this.isGuest = false});
+  const HospitalDashboard({super.key, this.isGuest = false, this.services});
 
   final bool isGuest;
+
+  /// Services the signed-in subscriber may open; `null` means unrestricted
+  /// (guest mode).
+  final Set<HospService>? services;
 
   @override
   State<HospitalDashboard> createState() => _HospitalDashboardState();
@@ -128,6 +139,17 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
   String _search = '';
 
   bool get _rtl => _isArabic;
+
+  bool _can(HospService service) => widget.services?.contains(service) ?? true;
+  bool get _isAdmin =>
+      SurgerySupabaseConfig.isConfigured &&
+      isAdminUser(Supabase.instance.client.auth.currentUser);
+  bool get _canSurgeryDepartments =>
+      _can(HospService.generalSurgery) || _can(HospService.oncologySurgery);
+  bool get _canHospital =>
+      _canSurgeryDepartments || _can(HospService.pediatricSurgery);
+  bool get _canClinics =>
+      _can(HospService.obgynClinic) || _can(HospService.pediatricsClinic);
   int get _waiting =>
       _queue.where((entry) => entry.status == QueueStatus.waiting).length;
 
@@ -325,22 +347,24 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
             Icons.grid_view_outlined,
             tr('نظرة عامة', 'Overview'),
           ),
-          _navTile(
-            AppTab.appointments,
-            Icons.calendar_month_outlined,
-            tr('المواعيد', 'Appointments'),
-          ),
-          _navTile(
-            AppTab.patients,
-            Icons.people_outline,
-            tr('المرضى', 'Patients'),
-          ),
-          _navTile(
-            AppTab.queue,
-            Icons.format_list_numbered,
-            tr('قائمة الانتظار', 'Waiting list'),
-            badge: _waiting,
-          ),
+          if (_canClinics) ...[
+            _navTile(
+              AppTab.appointments,
+              Icons.calendar_month_outlined,
+              tr('المواعيد', 'Appointments'),
+            ),
+            _navTile(
+              AppTab.patients,
+              Icons.people_outline,
+              tr('المرضى', 'Patients'),
+            ),
+            _navTile(
+              AppTab.queue,
+              Icons.format_list_numbered,
+              tr('قائمة الانتظار', 'Waiting list'),
+              badge: _waiting,
+            ),
+          ],
           const Spacer(),
           const Divider(color: Color(0xFF244D6C)),
           ListTile(
@@ -684,33 +708,39 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
           spacing: 16,
           runSpacing: 16,
           children: [
-            SizedBox(
-              width: wide ? 280 : double.infinity,
-              child: _managerCard(
-                title: 'Hospitals Manager',
-                arabicTitle: 'إدارة المستشفيات',
-                arabicDescription: 'الأقسام، الأسرة، الأطباء والعمليات اليومية',
-                description: 'Departments, beds, doctors, and daily operations',
-                icon: Icons.local_hospital_outlined,
-                colors: const [Color(0xFF2463C5), Color(0xFF1C4F9B)],
-                onTap: () => setState(() => _tab = AppTab.hospitalManager),
+            if (_canHospital)
+              SizedBox(
+                width: wide ? 280 : double.infinity,
+                child: _managerCard(
+                  title: 'Hospitals Manager',
+                  arabicTitle: 'إدارة المستشفيات',
+                  arabicDescription:
+                      'الأقسام، الأسرة، الأطباء والعمليات اليومية',
+                  description:
+                      'Departments, beds, doctors, and daily operations',
+                  icon: Icons.local_hospital_outlined,
+                  colors: const [Color(0xFF2463C5), Color(0xFF1C4F9B)],
+                  onTap: () => setState(() => _tab = AppTab.hospitalManager),
+                ),
               ),
-            ),
-            SizedBox(
-              width: wide ? 280 : double.infinity,
-              child: _managerCard(
-                title: 'Clinic Manager',
-                arabicTitle: 'إدارة العيادات',
-                arabicDescription: 'المواعيد، قوائم الانتظار وسير عمل العيادات',
-                description: 'Appointments, waiting lists, and clinic workflow',
-                icon: Icons.medical_services_outlined,
-                colors: const [Color(0xFF008C8A), Color(0xFF006A75)],
-                onTap: () => setState(() {
-                  _openClinic = null;
-                  _tab = AppTab.clinicManager;
-                }),
+            if (_canClinics)
+              SizedBox(
+                width: wide ? 280 : double.infinity,
+                child: _managerCard(
+                  title: 'Clinic Manager',
+                  arabicTitle: 'إدارة العيادات',
+                  arabicDescription:
+                      'المواعيد، قوائم الانتظار وسير عمل العيادات',
+                  description:
+                      'Appointments, waiting lists, and clinic workflow',
+                  icon: Icons.medical_services_outlined,
+                  colors: const [Color(0xFF008C8A), Color(0xFF006A75)],
+                  onTap: () => setState(() {
+                    _openClinic = null;
+                    _tab = AppTab.clinicManager;
+                  }),
+                ),
               ),
-            ),
             SizedBox(
               width: wide ? 280 : double.infinity,
               child: _managerCard(
@@ -724,6 +754,25 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
                 onTap: _showParameters,
               ),
             ),
+            if (_isAdmin)
+              SizedBox(
+                width: wide ? 280 : double.infinity,
+                child: _managerCard(
+                  title: 'Admin Panel',
+                  arabicTitle: 'لوحة تحكم المدير',
+                  arabicDescription:
+                      'قبول طلبات المستخدمين وإنشاء الحسابات وإدارة الخدمات',
+                  description:
+                      'Approve user requests, create accounts, and manage services',
+                  icon: Icons.admin_panel_settings_outlined,
+                  colors: const [Color(0xFF334155), Color(0xFF0F172A)],
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => AdminAccessPage(isArabic: _isArabic),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ],
@@ -815,34 +864,36 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
           spacing: 16,
           runSpacing: 16,
           children: [
-            SizedBox(
-              width: wide ? 310 : double.infinity,
-              child: _managerCard(
-                title: 'Departments Management',
-                arabicTitle: 'إدارة الأقسام',
-                arabicDescription:
-                    'إدارة أقسام المستشفى والوصول إلى صفحات الأقسام',
-                description:
-                    'Manage hospital departments and open their workspaces',
-                icon: Icons.apartment_outlined,
-                colors: const [Color(0xFF1E6FD9), Color(0xFF22A38A)],
-                onTap: () => setState(() => _tab = AppTab.departments),
+            if (_canSurgeryDepartments)
+              SizedBox(
+                width: wide ? 310 : double.infinity,
+                child: _managerCard(
+                  title: 'Departments Management',
+                  arabicTitle: 'إدارة الأقسام',
+                  arabicDescription:
+                      'إدارة أقسام المستشفى والوصول إلى صفحات الأقسام',
+                  description:
+                      'Manage hospital departments and open their workspaces',
+                  icon: Icons.apartment_outlined,
+                  colors: const [Color(0xFF1E6FD9), Color(0xFF22A38A)],
+                  onTap: () => setState(() => _tab = AppTab.departments),
+                ),
               ),
-            ),
-            SizedBox(
-              width: wide ? 310 : double.infinity,
-              child: _managerCard(
-                title: 'Waiting Lists',
-                arabicTitle: 'قوائم الانتظار',
-                arabicDescription:
-                    'راقب أدوار المرضى وحالة الخدمة في جميع العيادات',
-                description:
-                    'Monitor patient queues and service status across all clinics',
-                icon: Icons.format_list_numbered_rounded,
-                colors: const [Color(0xFFE87920), Color(0xFFC64F12)],
-                onTap: () => setState(() => _tab = AppTab.waitingLists),
+            if (_can(HospService.pediatricSurgery))
+              SizedBox(
+                width: wide ? 310 : double.infinity,
+                child: _managerCard(
+                  title: 'Waiting Lists',
+                  arabicTitle: 'قوائم الانتظار',
+                  arabicDescription:
+                      'راقب أدوار المرضى وحالة الخدمة في جميع العيادات',
+                  description:
+                      'Monitor patient queues and service status across all clinics',
+                  icon: Icons.format_list_numbered_rounded,
+                  colors: const [Color(0xFFE87920), Color(0xFFC64F12)],
+                  onTap: () => setState(() => _tab = AppTab.waitingLists),
+                ),
               ),
-            ),
           ],
         ),
       ],
@@ -884,32 +935,35 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
           spacing: 16,
           runSpacing: 16,
           children: [
-            SizedBox(
-              width: wide ? 310 : double.infinity,
-              child: _managerCard(
-                title: 'General Surgery',
-                arabicTitle: 'الجراحة العامة',
-                arabicDescription: 'قائمة انتظار العمليات والمتابعة',
-                description: 'Surgery waiting list and follow-up',
-                icon: Icons.local_hospital_outlined,
-                colors: const [Color(0xFF1E6FD9), Color(0xFF22A38A)],
-                onTap: () =>
-                    _openSurgeryPage((_) => const PatientFollowUpSheetPage()),
+            if (_can(HospService.generalSurgery))
+              SizedBox(
+                width: wide ? 310 : double.infinity,
+                child: _managerCard(
+                  title: 'General Surgery',
+                  arabicTitle: 'الجراحة العامة',
+                  arabicDescription: 'قائمة انتظار العمليات والمتابعة',
+                  description: 'Surgery waiting list and follow-up',
+                  icon: Icons.local_hospital_outlined,
+                  colors: const [Color(0xFF1E6FD9), Color(0xFF22A38A)],
+                  onTap: () =>
+                      _openSurgeryPage((_) => const PatientFollowUpSheetPage()),
+                ),
               ),
-            ),
-            SizedBox(
-              width: wide ? 310 : double.infinity,
-              child: _managerCard(
-                title: 'Oncology Surgery',
-                arabicTitle: 'جراحة الأورام',
-                arabicDescription: 'تسجيل مرضى جراحة الأورام ومتابعتهم',
-                description: 'Register and follow up oncology surgery patients',
-                icon: Icons.healing_outlined,
-                colors: const [Color(0xFF7A4CB3), Color(0xFF513086)],
-                onTap: () =>
-                    _openSurgeryPage((_) => const OncologySurgeryPage()),
+            if (_can(HospService.oncologySurgery))
+              SizedBox(
+                width: wide ? 310 : double.infinity,
+                child: _managerCard(
+                  title: 'Oncology Surgery',
+                  arabicTitle: 'جراحة الأورام',
+                  arabicDescription: 'تسجيل مرضى جراحة الأورام ومتابعتهم',
+                  description:
+                      'Register and follow up oncology surgery patients',
+                  icon: Icons.healing_outlined,
+                  colors: const [Color(0xFF7A4CB3), Color(0xFF513086)],
+                  onTap: () =>
+                      _openSurgeryPage((_) => const OncologySurgeryPage()),
+                ),
               ),
-            ),
           ],
         ),
       ],
@@ -1286,36 +1340,39 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
           spacing: 16,
           runSpacing: 16,
           children: [
-            SizedBox(
-              width: MediaQuery.sizeOf(context).width >= 900
-                  ? 280
-                  : double.infinity,
-              child: _managerCard(
-                title: 'Obstetrics & Gynecology Clinic',
-                arabicTitle: 'عيادة النسا والتوليد',
-                arabicDescription: 'إدارة مرضى عيادة النسا والتوليد',
-                description: 'Manage Obstetrics & Gynecology clinic patients',
-                icon: Icons.pregnant_woman_rounded,
-                colors: const [Color(0xFFD6457F), Color(0xFF9B2C62)],
-                onTap: () => setState(() => _openClinic = ClinicKind.obgyn),
+            if (_can(HospService.obgynClinic))
+              SizedBox(
+                width: MediaQuery.sizeOf(context).width >= 900
+                    ? 280
+                    : double.infinity,
+                child: _managerCard(
+                  title: 'Obstetrics & Gynecology Clinic',
+                  arabicTitle: 'عيادة النسا والتوليد',
+                  arabicDescription: 'إدارة مرضى عيادة النسا والتوليد',
+                  description: 'Manage Obstetrics & Gynecology clinic patients',
+                  icon: Icons.pregnant_woman_rounded,
+                  colors: const [Color(0xFFD6457F), Color(0xFF9B2C62)],
+                  onTap: () => setState(() => _openClinic = ClinicKind.obgyn),
+                ),
               ),
-            ),
-            SizedBox(
-              width: MediaQuery.sizeOf(context).width >= 900
-                  ? 280
-                  : double.infinity,
-              child: _managerCard(
-                title: 'Pediatrics Clinic',
-                arabicTitle: 'عيادة الأطفال',
-                arabicDescription: 'إدارة مرضى عيادة الأطفال والنمو والتطعيمات',
-                description:
-                    'Manage pediatric patients, growth and vaccinations',
-                icon: Icons.child_care_rounded,
-                colors: const [Color(0xFF29A3F0), Color(0xFF0F5FA8)],
-                onTap: () =>
-                    setState(() => _openClinic = ClinicKind.pediatrics),
+            if (_can(HospService.pediatricsClinic))
+              SizedBox(
+                width: MediaQuery.sizeOf(context).width >= 900
+                    ? 280
+                    : double.infinity,
+                child: _managerCard(
+                  title: 'Pediatrics Clinic',
+                  arabicTitle: 'عيادة الأطفال',
+                  arabicDescription:
+                      'إدارة مرضى عيادة الأطفال والنمو والتطعيمات',
+                  description:
+                      'Manage pediatric patients, growth and vaccinations',
+                  icon: Icons.child_care_rounded,
+                  colors: const [Color(0xFF29A3F0), Color(0xFF0F5FA8)],
+                  onTap: () =>
+                      setState(() => _openClinic = ClinicKind.pediatrics),
+                ),
               ),
-            ),
           ],
         ),
       ],

@@ -1,26 +1,57 @@
 import 'package:flutter/material.dart';
 import 'package:hospmaster/auth/account_button.dart';
+import 'package:hospmaster/auth/admin_panel_gate.dart';
+import 'package:hospmaster/auth/subscriber_gate.dart';
 import 'package:hospmaster/surgery/supabase_config.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// First screen of the app: lets the user continue as a guest or sign in as
 /// a subscriber.
-class ModeSelectionPage extends StatelessWidget {
+class ModeSelectionPage extends StatefulWidget {
   const ModeSelectionPage({
     super.key,
     required this.dashboardBuilder,
     this.isArabic = true,
   });
 
-  final Widget Function(BuildContext context, bool isGuest) dashboardBuilder;
+  final DashboardBuilder dashboardBuilder;
   final bool isArabic;
+
+  @override
+  State<ModeSelectionPage> createState() => _ModeSelectionPageState();
+}
+
+class _ModeSelectionPageState extends State<ModeSelectionPage> {
+  bool _opened = false;
+
+  bool get isArabic => widget.isArabic;
+  DashboardBuilder get dashboardBuilder => widget.dashboardBuilder;
 
   String tr(String ar, String en) => isArabic ? ar : en;
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _signedIn) _openDashboard(context, isGuest: false);
+    });
+  }
+
   void _openDashboard(BuildContext context, {required bool isGuest}) {
+    if (_opened) return;
+    _opened = true;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(
-        builder: (context) => dashboardBuilder(context, isGuest),
+        builder: (context) => isGuest
+            ? dashboardBuilder(context, true, null)
+            : SubscriberGate(
+                dashboardBuilder: dashboardBuilder,
+                isArabic: isArabic,
+                signedOutBuilder: (_) => ModeSelectionPage(
+                  dashboardBuilder: dashboardBuilder,
+                  isArabic: isArabic,
+                ),
+              ),
       ),
     );
   }
@@ -78,13 +109,20 @@ class ModeSelectionPage extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(32),
-                      child: Image.asset(
-                        'assets/icon/app_icon.png',
-                        width: 180,
-                        height: 180,
-                        fit: BoxFit.cover,
+                    _SecretTapLogo(
+                      onUnlocked: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => AdminPanelGate(isArabic: isArabic),
+                        ),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(32),
+                        child: Image.asset(
+                          'assets/icon/app_icon.png',
+                          width: 180,
+                          height: 180,
+                          fit: BoxFit.cover,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 32),
@@ -119,6 +157,43 @@ class ModeSelectionPage extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _SecretTapLogo extends StatefulWidget {
+  const _SecretTapLogo({required this.child, required this.onUnlocked});
+
+  final Widget child;
+  final VoidCallback onUnlocked;
+
+  @override
+  State<_SecretTapLogo> createState() => _SecretTapLogoState();
+}
+
+/// Counts quick consecutive taps; five taps with less than two seconds
+/// between them trigger [_SecretTapLogo.onUnlocked].
+class _SecretTapLogoState extends State<_SecretTapLogo> {
+  static const _requiredTaps = 5;
+  static const _maxGap = Duration(seconds: 2);
+
+  int _taps = 0;
+  DateTime? _lastTap;
+
+  void _onTap() {
+    final now = DateTime.now();
+    final last = _lastTap;
+    _taps = last != null && now.difference(last) <= _maxGap ? _taps + 1 : 1;
+    _lastTap = now;
+    if (_taps >= _requiredTaps) {
+      _taps = 0;
+      _lastTap = null;
+      widget.onUnlocked();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(onTap: _onTap, child: widget.child);
   }
 }
 

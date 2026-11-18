@@ -1,4 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:hospmaster/auth/admin_access_page.dart';
+import 'package:hospmaster/auth/google_oauth.dart';
+import 'package:hospmaster/auth/subscriber_gate.dart';
+import 'package:hospmaster/surgery/admin_access.dart';
 import 'package:hospmaster/surgery/supabase_config.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -22,15 +28,45 @@ class AccountButton extends StatelessWidget {
         if (user == null) {
           return _CreateAccountButton(isArabic: isArabic);
         }
+        final isAdmin = isAdminUser(user);
         return PopupMenuButton<String>(
           tooltip: user.email ?? '',
           icon: const Icon(Icons.account_circle_rounded),
-          onSelected: (_) => auth.signOut(),
+          onSelected: (value) {
+            switch (value) {
+              case 'manage_users':
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => AdminAccessPage(isArabic: isArabic),
+                  ),
+                );
+              case 'my_services':
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ServiceRequestPage(isArabic: isArabic),
+                  ),
+                );
+              default:
+                auth.signOut();
+            }
+          },
           itemBuilder: (context) => [
             PopupMenuItem<String>(
               enabled: false,
               child: Text(user.email ?? ''),
             ),
+            if (isAdmin)
+              PopupMenuItem<String>(
+                value: 'manage_users',
+                child: Text(
+                  isArabic ? 'المستخدمون والطلبات' : 'Users & requests',
+                ),
+              )
+            else
+              PopupMenuItem<String>(
+                value: 'my_services',
+                child: Text(isArabic ? 'خدماتي' : 'My services'),
+              ),
             PopupMenuItem<String>(
               value: 'sign_out',
               child: Text(isArabic ? 'تسجيل الخروج' : 'Sign out'),
@@ -96,16 +132,85 @@ class _AuthPageState extends State<AuthPage> {
   late bool _isSignIn = widget.startWithSignIn;
   bool _busy = false;
   bool _obscure = true;
+  bool _googleSignInPending = false;
   String? _error;
   String? _info;
+  StreamSubscription<AuthState>? _authSub;
 
   String tr(String ar, String en) => widget.isArabic ? ar : en;
 
   @override
+  void initState() {
+    super.initState();
+    if (SurgerySupabaseConfig.isConfigured) {
+      _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((
+        state,
+      ) {
+        if (state.event == AuthChangeEvent.signedIn &&
+            _googleSignInPending &&
+            mounted) {
+          _googleSignInPending = false;
+          Navigator.of(context).pop();
+        }
+      });
+    }
+  }
+
+  @override
   void dispose() {
+    _authSub?.cancel();
     _email.dispose();
     _password.dispose();
     super.dispose();
+  }
+
+  Future<void> _signInWithGoogle() async {
+    if (!SurgerySupabaseConfig.isConfigured) {
+      setState(() {
+        _error = tr(
+          'لم يتم إعداد Supabase في هذا التشغيل.',
+          'Supabase is not configured for this run.',
+        );
+      });
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+      _info = null;
+      _googleSignInPending = true;
+    });
+    try {
+      final launched = await signInWithGoogle();
+      if (!launched && mounted) {
+        setState(() {
+          _googleSignInPending = false;
+          _error = tr(
+            'تعذر بدء تسجيل الدخول عبر Google.',
+            'Could not start Google sign-in.',
+          );
+        });
+      }
+    } on AuthException catch (e) {
+      if (mounted) {
+        setState(() {
+          _googleSignInPending = false;
+          _error = e.message;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _googleSignInPending = false;
+          _error = tr(
+            'تعذر تسجيل الدخول عبر Google. تحقق من إعدادات Supabase.',
+            'Google sign-in failed. Check the Supabase configuration.',
+          );
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _submit() async {
@@ -283,6 +388,14 @@ class _AuthPageState extends State<AuthPage> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : Text(title),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : _signInWithGoogle,
+                      icon: const Icon(Icons.g_mobiledata, size: 24),
+                      label: Text(
+                        tr('المتابعة باستخدام Google', 'Continue with Google'),
+                      ),
                     ),
                     const SizedBox(height: 8),
                     TextButton(

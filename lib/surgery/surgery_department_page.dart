@@ -874,6 +874,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
     final formKey = GlobalKey<FormState>();
     final messenger = ScaffoldMessenger.of(context);
     final isEditing = initialPatient != null;
+    final canChangeDate = _isAdmin || !isEditing;
     final nameController = TextEditingController();
     final phoneController = TextEditingController();
     final yearsController = TextEditingController();
@@ -929,7 +930,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
         return StatefulBuilder(
           builder: (context, setDialogState) {
             Future<void> selectDate() async {
-              if (!_isAdmin) return;
+              if (!canChangeDate) return;
 
               final pickedDate = await showDatePicker(
                 context: context,
@@ -1633,19 +1634,19 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                         TextFormField(
                           controller: dateController,
                           readOnly: true,
-                          onTap: _isAdmin ? selectDate : null,
+                          onTap: canChangeDate ? selectDate : null,
                           decoration: InputDecoration(
                             labelText: 'Date',
                             prefixIcon: const Icon(
                               Icons.calendar_today_outlined,
                             ),
-                            suffixIcon: _isAdmin
+                            suffixIcon: canChangeDate
                                 ? const Icon(Icons.edit_outlined)
                                 : const Icon(Icons.lock_outline),
                             isDense: true,
-                            helperText: _isAdmin
+                            helperText: canChangeDate
                                 ? 'يمكن تعديل التاريخ'
-                                : 'تاريخ اليوم - للأدمن فقط',
+                                : 'لا يمكن تغيير التاريخ إلا للأدمن',
                           ),
                           validator: (value) {
                             if (value == null || value.trim().isEmpty) {

@@ -88,6 +88,7 @@ void main() {
 
     expect(find.text('إنشاء حساب'), findsWidgets);
     expect(find.text('كلمة المرور'), findsOneWidget);
+    expect(find.text('المتابعة باستخدام Google'), findsOneWidget);
   });
 
   testWidgets('requires Supabase configuration for surgery waiting lists', (
