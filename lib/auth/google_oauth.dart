@@ -9,7 +9,9 @@ String googleOAuthRedirectTo() {
     path = path.substring(0, path.length - 'index.html'.length);
   }
   if (!path.endsWith('/')) path = '$path/';
-  return Uri.base.replace(path: path, query: '', fragment: '').toString();
+  // Built from origin + path: Uri.replace(query: '', fragment: '') would leave
+  // a trailing "?#" that no Supabase redirect allow-list entry matches.
+  return '${Uri.base.origin}$path';
 }
 
 Future<bool> signInWithGoogle() {

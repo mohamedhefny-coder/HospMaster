@@ -115,16 +115,25 @@ class _AuthPageState extends State<AuthPage> {
   void initState() {
     super.initState();
     if (SurgerySupabaseConfig.isConfigured) {
-      _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((
-        state,
-      ) {
-        if (state.event == AuthChangeEvent.signedIn &&
-            _googleSignInPending &&
-            mounted) {
-          _googleSignInPending = false;
-          Navigator.of(context).pop();
-        }
-      });
+      _authSub = Supabase.instance.client.auth.onAuthStateChange.listen(
+        (state) {
+          if (state.event == AuthChangeEvent.signedIn &&
+              _googleSignInPending &&
+              mounted) {
+            _googleSignInPending = false;
+            Navigator.of(context).pop();
+          }
+        },
+        onError: (Object error) {
+          if (!mounted) return;
+          setState(() {
+            _googleSignInPending = false;
+            _error = error is AuthException
+                ? error.message
+                : tr('تعذر تسجيل الدخول عبر Google.', 'Google sign-in failed.');
+          });
+        },
+      );
     }
   }
 

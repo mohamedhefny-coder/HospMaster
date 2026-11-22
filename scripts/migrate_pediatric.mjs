@@ -3,8 +3,13 @@
 //
 // Usage (PowerShell):
 //   $env:SRC_URL='https://<src>.supabase.co'; $env:SRC_KEY='sb_publishable_...'
-//   $env:DST_URL='https://<dst>.supabase.co'; $env:DST_KEY='sb_publishable_...'
+//   $env:DST_URL='https://<dst>.supabase.co'; $env:DST_KEY='sb_secret_...'
 //   node scripts/migrate_pediatric.mjs
+//
+// Once 20261118_service_access.sql is applied, the destination tables and
+// bucket only accept signed-in users with the service, so DST_KEY must be the
+// project's secret (service role) key from Settings > API Keys. Keep it local;
+// never commit it or put it in the app.
 
 const { SRC_URL, SRC_KEY, DST_URL, DST_KEY } = process.env;
 if (!SRC_URL || !SRC_KEY || !DST_URL || !DST_KEY) {

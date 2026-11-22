@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:hospmaster/auth/account_button.dart';
 import 'package:hospmaster/auth/admin_panel_gate.dart';
@@ -28,6 +30,7 @@ class ModeSelectionPage extends StatefulWidget {
 
 class _ModeSelectionPageState extends State<ModeSelectionPage> {
   bool _opened = false;
+  StreamSubscription<AuthState>? _authSub;
 
   bool get isArabic => widget.isArabic;
   DashboardBuilder get dashboardBuilder => widget.dashboardBuilder;
@@ -37,11 +40,38 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && widget.autoOpen && _signedIn) {
-        _openDashboard(context, isGuest: false);
-      }
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _autoOpen());
+    if (SurgerySupabaseConfig.isConfigured) {
+      // The OAuth session can land after the first frame (deep link on
+      // mobile, code exchange on web), so keep listening for it.
+      _authSub = Supabase.instance.client.auth.onAuthStateChange.listen(
+        (state) {
+          if (state.event == AuthChangeEvent.signedIn ||
+              state.event == AuthChangeEvent.initialSession) {
+            _autoOpen();
+          }
+        },
+        onError: (Object error) {
+          if (!mounted || error is! AuthException) return;
+          ScaffoldMessenger.maybeOf(
+            context,
+          )?.showSnackBar(SnackBar(content: Text(error.message)));
+        },
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
+  }
+
+  void _autoOpen() {
+    if (!mounted || !widget.autoOpen || !_signedIn) return;
+    // Skip while another page (e.g. the sign-in page) is on top.
+    if (ModalRoute.of(context)?.isCurrent != true) return;
+    _openDashboard(context, isGuest: false);
   }
 
   void _openDashboard(BuildContext context, {required bool isGuest}) {
