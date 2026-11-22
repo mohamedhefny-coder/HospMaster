@@ -19,12 +19,8 @@ class AdminPanelGate extends StatefulWidget {
 }
 
 class _AdminPanelGateState extends State<AdminPanelGate> {
-  final _formKey = GlobalKey<FormState>();
-  final _email = TextEditingController();
-  final _password = TextEditingController();
   StreamSubscription<AuthState>? _authSub;
   bool _busy = false;
-  bool _obscure = true;
   bool _googleSignInPending = false;
   String? _error;
 
@@ -99,47 +95,7 @@ class _AdminPanelGateState extends State<AdminPanelGate> {
   @override
   void dispose() {
     _authSub?.cancel();
-    _email.dispose();
-    _password.dispose();
     super.dispose();
-  }
-
-  Future<void> _signIn() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    final auth = Supabase.instance.client.auth;
-    try {
-      final response = await auth.signInWithPassword(
-        email: _email.text.trim(),
-        password: _password.text,
-      );
-      if (!isAdminUser(response.user)) {
-        await auth.signOut();
-        if (!mounted) return;
-        setState(() {
-          _error = tr(
-            'هذا الحساب ليس لديه صلاحية المدير.',
-            'This account does not have admin access.',
-          );
-        });
-      }
-    } on AuthException catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _error = tr(
-            'تعذر الاتصال. حاول مرة أخرى.',
-            'Could not connect. Please try again.',
-          );
-        });
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
   }
 
   @override
@@ -174,88 +130,42 @@ class _AdminPanelGateState extends State<AdminPanelGate> {
   }
 
   Widget _form() {
-    return Form(
-      key: _formKey,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Icon(
-            Icons.admin_panel_settings_outlined,
-            size: 56,
-            color: Color(0xFF102A43),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Icon(
+          Icons.admin_panel_settings_outlined,
+          size: 56,
+          color: Color(0xFF102A43),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          tr(
+            'سجّل الدخول بحساب Google الخاص بالمدير للمتابعة',
+            'Sign in with the admin Google account to continue',
           ),
-          const SizedBox(height: 8),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 20),
+        if (_error != null) ...[
           Text(
-            tr(
-              'سجّل الدخول بحساب المدير للمتابعة',
-              'Sign in with an admin account to continue',
-            ),
-            textAlign: TextAlign.center,
+            _error!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
-          const SizedBox(height: 20),
-          TextFormField(
-            controller: _email,
-            keyboardType: TextInputType.emailAddress,
-            textDirection: TextDirection.ltr,
-            autofillHints: const [AutofillHints.email],
-            decoration: InputDecoration(
-              labelText: tr('البريد الإلكتروني', 'Email'),
-              prefixIcon: const Icon(Icons.email_outlined),
-              border: const OutlineInputBorder(),
-            ),
-            validator: (value) =>
-                RegExp(
-                  r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
-                ).hasMatch(value?.trim() ?? '')
-                ? null
-                : tr('أدخل بريدًا إلكترونيًا صحيحًا', 'Enter a valid email'),
-          ),
-          const SizedBox(height: 14),
-          TextFormField(
-            controller: _password,
-            obscureText: _obscure,
-            textDirection: TextDirection.ltr,
-            autofillHints: const [AutofillHints.password],
-            onFieldSubmitted: (_) => _busy ? null : _signIn(),
-            decoration: InputDecoration(
-              labelText: tr('كلمة المرور', 'Password'),
-              prefixIcon: const Icon(Icons.lock_outline),
-              border: const OutlineInputBorder(),
-              suffixIcon: IconButton(
-                onPressed: () => setState(() => _obscure = !_obscure),
-                icon: Icon(_obscure ? Icons.visibility : Icons.visibility_off),
-              ),
-            ),
-            validator: (value) => (value ?? '').isEmpty
-                ? tr('أدخل كلمة المرور', 'Enter your password')
-                : null,
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ],
-          const SizedBox(height: 18),
-          FilledButton(
-            onPressed: _busy ? null : _signIn,
-            child: _busy
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Text(tr('تسجيل الدخول', 'Sign in')),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _busy ? null : _signInWithGoogle,
-            icon: const Icon(Icons.g_mobiledata, size: 24),
-            label: Text(tr('المتابعة باستخدام Google', 'Continue with Google')),
-          ),
+          const SizedBox(height: 12),
         ],
-      ),
+        FilledButton.icon(
+          onPressed: _busy ? null : _signInWithGoogle,
+          icon: _busy
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.g_mobiledata, size: 24),
+          label: Text(tr('المتابعة باستخدام Google', 'Continue with Google')),
+        ),
+      ],
     );
   }
 }

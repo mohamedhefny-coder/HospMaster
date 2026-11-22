@@ -68,20 +68,10 @@ class _AdminAccessPageState extends State<AdminAccessPage> {
       builder: (_) => _AddUserDialog(isArabic: widget.isArabic),
     );
     if (user == null) return;
-    final ok = await _run(
-      () => user.password.isEmpty
-          ? _repository.grant(user.email, user.services)
-          : _repository.createUser(user.email, user.password, user.services),
-    );
+    final ok = await _run(() => _repository.grant(user.email, user.services));
     if (!ok || !mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          user.password.isEmpty
-              ? tr('تمت إضافة المستخدم', 'User added')
-              : tr('تم إنشاء الحساب', 'Account created'),
-        ),
-      ),
+      SnackBar(content: Text(tr('تمت إضافة المستخدم', 'User added'))),
     );
   }
 
@@ -292,10 +282,9 @@ class _AdminAccessPageState extends State<AdminAccessPage> {
 }
 
 class _NewUser {
-  const _NewUser(this.email, this.password, this.services);
+  const _NewUser(this.email, this.services);
 
   final String email;
-  final String password;
   final Set<HospService> services;
 }
 
@@ -310,9 +299,7 @@ class _AddUserDialog extends StatefulWidget {
 
 class _AddUserDialogState extends State<_AddUserDialog> {
   final _email = TextEditingController();
-  final _password = TextEditingController();
   final Set<HospService> _services = {};
-  bool _obscure = true;
   String? _error;
 
   String tr(String ar, String en) => widget.isArabic ? ar : en;
@@ -320,26 +307,15 @@ class _AddUserDialogState extends State<_AddUserDialog> {
   @override
   void dispose() {
     _email.dispose();
-    _password.dispose();
     super.dispose();
   }
 
   void _save() {
     final email = _email.text.trim();
-    final password = _password.text;
     if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
       setState(
         () =>
             _error = tr('أدخل بريدًا إلكترونيًا صحيحًا', 'Enter a valid email'),
-      );
-      return;
-    }
-    if (password.isNotEmpty && password.length < 6) {
-      setState(
-        () => _error = tr(
-          'كلمة المرور 6 أحرف على الأقل',
-          'Password must be at least 6 characters',
-        ),
       );
       return;
     }
@@ -352,7 +328,7 @@ class _AddUserDialogState extends State<_AddUserDialog> {
       );
       return;
     }
-    Navigator.pop(context, _NewUser(email, password, Set.of(_services)));
+    Navigator.pop(context, _NewUser(email, Set.of(_services)));
   }
 
   @override
@@ -368,8 +344,8 @@ class _AddUserDialogState extends State<_AddUserDialog> {
             children: [
               Text(
                 tr(
-                  'أدخل كلمة مرور لإنشاء الحساب فورًا. أو اتركها فارغة ليحصل المستخدم على الخدمات عند تسجيله بهذا البريد.',
-                  'Enter a password to create the account now, or leave it empty so the user gets the services when they sign up with this email.',
+                  'أدخل بريد Google الخاص بالمستخدم ليحصل على الخدمات عند تسجيل دخوله به.',
+                  'Enter the user\'s Google email so they get the services when they sign in with it.',
                 ),
                 style: const TextStyle(fontSize: 12),
               ),
@@ -381,22 +357,6 @@ class _AddUserDialogState extends State<_AddUserDialog> {
                 decoration: InputDecoration(
                   labelText: tr('البريد الإلكتروني', 'Email'),
                   border: const OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _password,
-                obscureText: _obscure,
-                textDirection: TextDirection.ltr,
-                decoration: InputDecoration(
-                  labelText: tr('كلمة المرور (اختياري)', 'Password (optional)'),
-                  border: const OutlineInputBorder(),
-                  suffixIcon: IconButton(
-                    onPressed: () => setState(() => _obscure = !_obscure),
-                    icon: Icon(
-                      _obscure ? Icons.visibility : Icons.visibility_off,
-                    ),
-                  ),
                 ),
               ),
               const SizedBox(height: 8),

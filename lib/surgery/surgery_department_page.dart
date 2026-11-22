@@ -481,7 +481,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
   void initState() {
     super.initState();
     _loadWaitingPatients();
-    _tabController = TabController(length: 9, vsync: this)
+    _tabController = TabController(length: 8, vsync: this)
       ..addListener(() {
         if (_tabController.indexIsChanging) return;
         if (_currentTabIndex == _tabController.index) return;
@@ -2679,11 +2679,6 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                                 accentColor: Color(0xFFD64545),
                                 count: _emergencyStagePatients.length,
                               ),
-                              _SeparatedTab(
-                                label: 'parameters',
-                                accentColor: Color(0xFF62727B),
-                                count: 0,
-                              ),
                             ],
                           ),
                         ),
@@ -2803,10 +2798,6 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                       errorMessage: _patientsError,
                       onRetryPressed: _loadWaitingPatients,
                       patientCardBuilder: _buildPatientCardForStage,
-                    ),
-                    _ParametersTab(
-                      onScrollPositionChanged: (position) =>
-                          _setTabScrollPosition(8, position),
                     ),
                   ],
                 ),
@@ -3043,144 +3034,143 @@ class _OperationListsTab extends StatelessWidget {
   }
 }
 
-class _ParametersTab extends StatelessWidget {
-  const _ParametersTab({required this.onScrollPositionChanged});
+class PediatricParametersSection extends StatelessWidget {
+  const PediatricParametersSection({super.key, this.isArabic = true});
 
-  final ValueChanged<ScrollPosition?> onScrollPositionChanged;
+  final bool isArabic;
 
   @override
   Widget build(BuildContext context) {
-    return _TabScrollPositionReporter(
-      onPositionChanged: onScrollPositionChanged,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 88),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'parameters',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-                color: Color(0xFF16324F),
-              ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Text(
+            isArabic ? 'معايير الأطفال' : 'Pediatric Parameters',
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF16324F),
             ),
-            const SizedBox(height: 12),
-            GridView.count(
-              crossAxisCount: 3,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-              childAspectRatio: 0.82,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
-                _ParameterCard(
-                  icon: Icons.monitor_heart_outlined,
-                  title: 'معدل BP',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const _PediatricBloodPressurePage(),
-                      ),
-                    );
-                  },
-                ),
-                _ParameterCard(
-                  icon: Icons.favorite_outline,
-                  title: 'معدل HR',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const _PediatricVitalReferencePage(
-                          title: 'معدل HR للأطفال',
-                          columnTitle: 'النبض / دقيقة',
-                          icon: Icons.favorite_outline,
-                          ranges: [
-                            ('حديثو الولادة (0 - 3 أشهر)', '110 - 160'),
-                            ('الرضع (3 - 12 شهرًا)', '90 - 150'),
-                            ('الأطفال الصغار (1 - 3 سنوات)', '80 - 125'),
-                            ('مرحلة ما قبل المدرسة (3 - 6 سنوات)', '70 - 115'),
-                            ('المدرسة (6 - 12 سنة)', '60 - 100'),
-                            ('المراهقون (12 - 18 سنة)', '60 - 100'),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-                _ParameterCard(
-                  icon: Icons.air_outlined,
-                  title: 'معدل RR',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const _PediatricVitalReferencePage(
-                          title: 'معدل RR للأطفال',
-                          columnTitle: 'التنفس / دقيقة',
-                          icon: Icons.air_outlined,
-                          ranges: [
-                            ('حديثو الولادة (0 - 3 أشهر)', '30 - 60'),
-                            ('الرضع (3 - 12 شهرًا)', '25 - 45'),
-                            ('الأطفال الصغار (1 - 3 سنوات)', '20 - 30'),
-                            ('مرحلة ما قبل المدرسة (3 - 6 سنوات)', '20 - 25'),
-                            ('المدرسة (6 - 12 سنة)', '14 - 22'),
-                            ('المراهقون (12 - 18 سنة)', '12 - 18'),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-                _ParameterCard(
-                  icon: Icons.monitor_weight_outlined,
-                  title: 'معدل الوزن',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const _PediatricWeightPage(),
-                      ),
-                    );
-                  },
-                ),
-                _ParameterCard(
-                  icon: Icons.height_outlined,
-                  title: 'معدل الطول',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const _PediatricHeightPage(),
-                      ),
-                    );
-                  },
-                ),
-                _ParameterCard(
-                  icon: Icons.circle_outlined,
-                  title: 'محيط الرأس',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const _PediatricHeadCircumferencePage(),
-                      ),
-                    );
-                  },
-                ),
-                _ParameterCard(
-                  icon: Icons.straighten_outlined,
-                  title: 'محيط البطن',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            const _PediatricAbdominalCircumferencePage(),
-                      ),
-                    );
-                  },
-                ),
-              ],
-            ),
-          ],
+          ),
         ),
-      ),
+        Directionality(
+          textDirection: TextDirection.rtl,
+          child: GridView.count(
+            crossAxisCount: 3,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 8,
+            childAspectRatio: 0.82,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              _ParameterCard(
+                icon: Icons.monitor_heart_outlined,
+                title: 'معدل BP',
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const _PediatricBloodPressurePage(),
+                    ),
+                  );
+                },
+              ),
+              _ParameterCard(
+                icon: Icons.favorite_outline,
+                title: 'معدل HR',
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const _PediatricVitalReferencePage(
+                        title: 'معدل HR للأطفال',
+                        columnTitle: 'النبض / دقيقة',
+                        icon: Icons.favorite_outline,
+                        ranges: [
+                          ('حديثو الولادة (0 - 3 أشهر)', '110 - 160'),
+                          ('الرضع (3 - 12 شهرًا)', '90 - 150'),
+                          ('الأطفال الصغار (1 - 3 سنوات)', '80 - 125'),
+                          ('مرحلة ما قبل المدرسة (3 - 6 سنوات)', '70 - 115'),
+                          ('المدرسة (6 - 12 سنة)', '60 - 100'),
+                          ('المراهقون (12 - 18 سنة)', '60 - 100'),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+              _ParameterCard(
+                icon: Icons.air_outlined,
+                title: 'معدل RR',
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const _PediatricVitalReferencePage(
+                        title: 'معدل RR للأطفال',
+                        columnTitle: 'التنفس / دقيقة',
+                        icon: Icons.air_outlined,
+                        ranges: [
+                          ('حديثو الولادة (0 - 3 أشهر)', '30 - 60'),
+                          ('الرضع (3 - 12 شهرًا)', '25 - 45'),
+                          ('الأطفال الصغار (1 - 3 سنوات)', '20 - 30'),
+                          ('مرحلة ما قبل المدرسة (3 - 6 سنوات)', '20 - 25'),
+                          ('المدرسة (6 - 12 سنة)', '14 - 22'),
+                          ('المراهقون (12 - 18 سنة)', '12 - 18'),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+              _ParameterCard(
+                icon: Icons.monitor_weight_outlined,
+                title: 'معدل الوزن',
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const _PediatricWeightPage(),
+                    ),
+                  );
+                },
+              ),
+              _ParameterCard(
+                icon: Icons.height_outlined,
+                title: 'معدل الطول',
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const _PediatricHeightPage(),
+                    ),
+                  );
+                },
+              ),
+              _ParameterCard(
+                icon: Icons.circle_outlined,
+                title: 'محيط الرأس',
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const _PediatricHeadCircumferencePage(),
+                    ),
+                  );
+                },
+              ),
+              _ParameterCard(
+                icon: Icons.straighten_outlined,
+                title: 'محيط البطن',
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          const _PediatricAbdominalCircumferencePage(),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -4103,7 +4093,6 @@ class _SeparatedTab extends StatelessWidget {
         'follow up' => 148,
         'addmission' => 148,
         'Emergency' => 150,
-        'parameters' => 150,
         _ => 118,
       },
       height: 58,
@@ -6148,7 +6137,45 @@ class _PediatricHeaderCard extends StatelessWidget {
   }
 }
 
-class _ModernDoctorCard extends StatelessWidget {
+class _EcgPainter extends CustomPainter {
+  const _EcgPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final y = size.height * 0.5;
+    final unit = size.width / 12;
+    final path = Path()..moveTo(0, y);
+    for (var i = 0; i < 12; i += 4) {
+      final x = i * unit;
+      path
+        ..lineTo(x + unit * 0.9, y)
+        ..lineTo(x + unit * 1.2, y - size.height * 0.18)
+        ..lineTo(x + unit * 1.5, y + size.height * 0.12)
+        ..lineTo(x + unit * 1.85, y - size.height * 0.95)
+        ..lineTo(x + unit * 2.2, y + size.height * 0.6)
+        ..lineTo(x + unit * 2.5, y)
+        ..lineTo(x + unit * 3.1, y - size.height * 0.16)
+        ..lineTo(x + unit * 3.5, y)
+        ..lineTo(x + unit * 4, y);
+    }
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6
+        ..strokeJoin = StrokeJoin.round
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_EcgPainter oldDelegate) => oldDelegate.color != color;
+}
+
+class _ModernDoctorCard extends StatefulWidget {
   const _ModernDoctorCard({
     required this.name,
     required this.colors,
@@ -6167,152 +6194,361 @@ class _ModernDoctorCard extends StatelessWidget {
   final int admissionCount;
   final VoidCallback onTap;
 
-  Widget _metric(String label, int value, IconData icon) {
+  @override
+  State<_ModernDoctorCard> createState() => _ModernDoctorCardState();
+}
+
+class _ModernDoctorCardState extends State<_ModernDoctorCard> {
+  static const _waitingColor = Color(0xFFFFC145);
+  static const _followUpColor = Color(0xFF22D3EE);
+  static const _admissionColor = Color(0xFF34D399);
+
+  bool _hovered = false;
+  bool _pressed = false;
+
+  String get _initial {
+    final cleaned = widget.name
+        .replaceAll(RegExp(r'^(أ\.\s*)?د\.?\s*'), '')
+        .trim();
+    return cleaned.isEmpty ? '؟' : String.fromCharCode(cleaned.runes.first);
+  }
+
+  Widget _stat(String label, int value, Color color) {
     return Expanded(
+      child: Column(
+        children: [
+          Text(
+            value.toString(),
+            style: TextStyle(
+              color: color,
+              fontSize: 28,
+              height: 1,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: color.withValues(alpha: 0.7),
+                      blurRadius: 6,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Color(0xFFCBD5E1),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _caseloadBar(int total) {
+    Widget segment(int value, Color color) => Expanded(
+      flex: value,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+        margin: const EdgeInsets.symmetric(horizontal: 1.5),
         decoration: BoxDecoration(
-          color: const Color(0xFFF7FAFC),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, size: 19, color: accent),
-            const SizedBox(height: 4),
-            Text(
-              value.toString(),
-              style: TextStyle(
-                color: colors.first,
-                fontSize: 18,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            Text(
-              label,
-              style: const TextStyle(
-                color: Color(0xFF64748B),
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+          color: color,
+          borderRadius: BorderRadius.circular(6),
+          boxShadow: [
+            BoxShadow(color: color.withValues(alpha: 0.55), blurRadius: 8),
           ],
         ),
       ),
+    );
+
+    return SizedBox(
+      height: 8,
+      child: total == 0
+          ? Container(
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+              ),
+            )
+          : Row(
+              children: [
+                if (widget.waitingCount > 0)
+                  segment(widget.waitingCount, _waitingColor),
+                if (widget.followUpCount > 0)
+                  segment(widget.followUpCount, _followUpColor),
+                if (widget.admissionCount > 0)
+                  segment(widget.admissionCount, _admissionColor),
+              ],
+            ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: EdgeInsets.zero,
-      elevation: 0,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(22),
-        side: const BorderSide(color: Color(0xFFE2E8F0)),
-      ),
-      child: InkWell(
-        onTap: onTap,
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.fromLTRB(16, 16, 12, 16),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: colors,
-                  begin: AlignmentDirectional.topStart,
-                  end: AlignmentDirectional.bottomEnd,
-                ),
+    final base = widget.colors.first;
+    final glow = widget.colors.last;
+    final total =
+        widget.waitingCount + widget.followUpCount + widget.admissionCount;
+    final dark = Color.lerp(base, const Color(0xFF020617), 0.62)!;
+    final darker = Color.lerp(base, const Color(0xFF020617), 0.86)!;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapUp: (_) => setState(() => _pressed = false),
+        onTapCancel: () => setState(() => _pressed = false),
+        child: AnimatedScale(
+          scale: _pressed ? 0.98 : (_hovered ? 1.015 : 1),
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(30),
+              gradient: LinearGradient(
+                colors: [dark, darker],
+                begin: AlignmentDirectional.topStart,
+                end: AlignmentDirectional.bottomEnd,
               ),
-              child: Row(
+              border: Border.all(
+                color: glow.withValues(alpha: _hovered ? 0.8 : 0.4),
+                width: 1.2,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: glow.withValues(alpha: _hovered ? 0.5 : 0.28),
+                  blurRadius: _hovered ? 34 : 24,
+                  offset: const Offset(0, 14),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(30),
+              child: Stack(
                 children: [
-                  CircleAvatar(
-                    radius: 29,
-                    backgroundColor: Colors.white.withValues(alpha: 0.18),
-                    child: const Icon(
-                      Icons.medical_services_outlined,
-                      color: Colors.white,
-                      size: 30,
+                  PositionedDirectional(
+                    top: -60,
+                    end: -50,
+                    child: Container(
+                      width: 190,
+                      height: 190,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: RadialGradient(
+                          colors: [
+                            glow.withValues(alpha: 0.55),
+                            glow.withValues(alpha: 0),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
+                  PositionedDirectional(
+                    bottom: -30,
+                    start: -30,
+                    child: Icon(
+                      Icons.medical_services_rounded,
+                      size: 150,
+                      color: Colors.white.withValues(alpha: 0.04),
+                    ),
+                  ),
+                  Positioned.fill(
+                    top: 70,
+                    bottom: 130,
+                    child: CustomPaint(
+                      painter: _EcgPainter(glow.withValues(alpha: 0.28)),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(18),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'استشاري جراحة أطفال',
-                          style: TextStyle(
-                            color: Color(0xFFD9F9F2),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
+                        Row(
+                          children: [
+                            Container(
+                              width: 68,
+                              height: 68,
+                              padding: const EdgeInsets.all(3),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: SweepGradient(
+                                  colors: [
+                                    _waitingColor,
+                                    glow,
+                                    _followUpColor,
+                                    _admissionColor,
+                                    _waitingColor,
+                                  ],
+                                ),
+                              ),
+                              child: Container(
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: darker,
+                                ),
+                                child: Text(
+                                  _initial,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 30,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.1,
+                                      ),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(
+                                        color: Colors.white.withValues(
+                                          alpha: 0.18,
+                                        ),
+                                      ),
+                                    ),
+                                    child: const Text(
+                                      'استشاري جراحة أطفال',
+                                      style: TextStyle(
+                                        color: Color(0xFFE2E8F0),
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    widget.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 21,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 5),
-                        Text(
-                          name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w900,
+                        const SizedBox(height: 20),
+                        Row(
+                          children: [
+                            Text(
+                              'إجمالي الحالات',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.6),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              total.toString(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        _caseloadBar(total),
+                        const SizedBox(height: 18),
+                        Row(
+                          children: [
+                            _stat('انتظار', widget.waitingCount, _waitingColor),
+                            _stat(
+                              'متابعة',
+                              widget.followUpCount,
+                              _followUpColor,
+                            ),
+                            _stat(
+                              'حجز',
+                              widget.admissionCount,
+                              _admissionColor,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            gradient: LinearGradient(
+                              colors: _hovered
+                                  ? [glow, widget.colors.first]
+                                  : [
+                                      Colors.white.withValues(alpha: 0.14),
+                                      Colors.white.withValues(alpha: 0.06),
+                                    ],
+                            ),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.2),
+                            ),
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'فتح قائمة الطبيب',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Icon(
+                                Icons.arrow_back_rounded,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                            ],
                           ),
                         ),
                       ],
                     ),
                   ),
-                  const Icon(
-                    Icons.arrow_back_ios_new_rounded,
-                    color: Colors.white,
-                    size: 18,
-                  ),
                 ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      _metric(
-                        'انتظار',
-                        waitingCount,
-                        Icons.hourglass_bottom_rounded,
-                      ),
-                      const SizedBox(width: 8),
-                      _metric(
-                        'متابعة',
-                        followUpCount,
-                        Icons.event_repeat_rounded,
-                      ),
-                      const SizedBox(width: 8),
-                      _metric('حجز', admissionCount, Icons.bed_outlined),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 11),
-                    decoration: BoxDecoration(
-                      color: accent.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(13),
-                    ),
-                    child: Text(
-                      'فتح قائمة الطبيب',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: colors.first,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

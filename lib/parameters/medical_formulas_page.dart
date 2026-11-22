@@ -2,6 +2,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:hospmaster/auth/account_button.dart';
+import 'package:hospmaster/parameters/clinical_scores.dart';
+import 'package:hospmaster/surgery/surgery_department_page.dart'
+    show PediatricParametersSection;
 
 const _navy = Color(0xFF172B4D);
 const _purple = Color(0xFF7A4CB3);
@@ -44,6 +47,13 @@ class _Formula {
 }
 
 String _n(double value, [int digits = 1]) => value.toStringAsFixed(digits);
+
+/// Holliday-Segar maintenance fluid in mL/day (100/50/20 mL/kg).
+double _maintenancePerDay(double kg) {
+  if (kg <= 10) return kg * 100;
+  if (kg <= 20) return 1000 + (kg - 10) * 50;
+  return 1500 + (kg - 20) * 20;
+}
 
 final List<_Formula> _formulas = [
   _Formula(
@@ -511,6 +521,68 @@ final List<_Formula> _formulas = [
       return 'Calculated = ${_n(calculated, 2)} mg  |  Final = ${_n(finalDose, 2)} mg';
     },
   ),
+  _Formula(
+    arTitle: 'السوائل اليومية أثناء الصيام (Holliday-Segar)',
+    enTitle: 'Daily Maintenance Fluids While Fasting (Holliday-Segar)',
+    expression:
+        '≤10 kg: 100 mL/kg  |  10-20 kg: +50 mL/kg  |  >20 kg: +20 mL/kg',
+    icon: Icons.water_drop_outlined,
+    source:
+        'Holliday & Segar (1957). Not for neonates in the first days of life; adjust for fever, renal/cardiac disease and the local protocol.',
+    fields: const [_Field('w', 'الوزن', 'Weight', unit: 'kg')],
+    compute: (v, female, ar) {
+      final w = v['w'];
+      if (w == null || w <= 0) return null;
+      final day = _maintenancePerDay(w);
+      return 'Maintenance = ${_n(day, 0)} mL/24 h  |  ${_n(day / 24)} mL/h  |  ${_n(day / w)} mL/kg/day';
+    },
+  ),
+  _Formula(
+    arTitle: 'عجز السوائل قبل العملية (فترة الصيام)',
+    enTitle: 'Preoperative Fasting Fluid Deficit',
+    expression: 'deficit = hourly maintenance (4-2-1) × fasting hours',
+    icon: Icons.hourglass_bottom_outlined,
+    source:
+        'Common anesthesia practice: replace 50% of the deficit in the first hour and 25% in each of the next two hours, using an isotonic fluid. Follow the local protocol.',
+    fields: const [
+      _Field('w', 'الوزن', 'Weight', unit: 'kg'),
+      _Field('h', 'ساعات الصيام', 'Fasting hours', unit: 'h'),
+    ],
+    compute: (v, female, ar) {
+      final w = v['w'], h = v['h'];
+      if (w == null || h == null || w <= 0 || h <= 0) return null;
+      final perHour = _maintenancePerDay(w) / 24;
+      final deficit = perHour * h;
+      return 'Maintenance = ${_n(perHour)} mL/h  |  Deficit = ${_n(deficit, 0)} mL\n'
+          '1st hour = ${_n(deficit * 0.5, 0)} mL  |  2nd hour = ${_n(deficit * 0.25, 0)} mL  |  3rd hour = ${_n(deficit * 0.25, 0)} mL';
+    },
+  ),
+  _Formula(
+    arTitle: 'السوائل بعد العملية أثناء الصيام (24 ساعة)',
+    enTitle: 'Postoperative Fluids While Fasting (24 h)',
+    expression: 'total = maintenance (Holliday-Segar) + ongoing losses',
+    icon: Icons.local_hospital_outlined,
+    source:
+        'Add measured losses (NG tube, drains, stoma, vomiting) as replacement, usually with an isotonic fluid. Reassess volume status and electrolytes daily.',
+    fields: const [
+      _Field('w', 'الوزن', 'Weight', unit: 'kg'),
+      _Field(
+        'loss',
+        'الفقد المستمر (اختياري)',
+        'Ongoing losses (optional)',
+        unit: 'mL/24 h',
+      ),
+    ],
+    compute: (v, female, ar) {
+      final w = v['w'];
+      if (w == null || w <= 0) return null;
+      final loss = math.max(v['loss'] ?? 0.0, 0.0);
+      final maintenance = _maintenancePerDay(w);
+      final total = maintenance + loss;
+      return 'Maintenance = ${_n(maintenance, 0)} mL  |  Losses = ${_n(loss, 0)} mL\n'
+          'Total = ${_n(total, 0)} mL/24 h  |  ${_n(total / 24)} mL/h';
+    },
+  ),
 ];
 
 class MedicalFormulasPage extends StatefulWidget {
@@ -546,84 +618,99 @@ class _MedicalFormulasPageState extends State<MedicalFormulasPage> {
 
     return Directionality(
       textDirection: _isArabic ? TextDirection.rtl : TextDirection.ltr,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(
-            tr('الإعدادات والمعادلات الطبية', 'Parameters & Medical Formulas'),
-          ),
-          backgroundColor: Colors.white,
-          foregroundColor: _navy,
-          actions: [
-            AccountButton(isArabic: _isArabic),
-            Center(
-              child: Text(
-                tr('العربية', 'English'),
-                style: const TextStyle(fontSize: 12, color: _purple),
+      child: DefaultTabController(
+        length: 3,
+        child: Scaffold(
+          appBar: AppBar(
+            title: Text(tr('المعايير الطبية', 'Medical Parameters')),
+            backgroundColor: Colors.white,
+            foregroundColor: _navy,
+            actions: [
+              AccountButton(isArabic: _isArabic),
+              Center(
+                child: Text(
+                  tr('العربية', 'English'),
+                  style: const TextStyle(fontSize: 12, color: _purple),
+                ),
               ),
-            ),
-            Switch(
-              value: _isArabic,
-              onChanged: (value) {
-                setState(() => _isArabic = value);
-                widget.onLanguageChanged(value);
-              },
-            ),
-            const SizedBox(width: 8),
-          ],
-        ),
-        body: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 900),
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                TextField(
-                  onChanged: (value) => setState(() => _search = value),
-                  decoration: InputDecoration(
-                    prefixIcon: const Icon(Icons.search),
-                    hintText: tr('ابحث عن معادلة...', 'Search formulas...'),
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Text(
-                    tr(
-                      'للمساعدة السريرية فقط وليست وصفة علاجية. راجع التشخيص، العمر، الحساسية، وظائف الكلى والكبد، التركيز، الحد الأقصى، والبروتوكول المحلي قبل إعطاء أي دواء. الدور الحالي: ${widget.role}',
-                      'Clinical support only, not a prescription. Verify diagnosis, age, allergies, renal/hepatic function, concentration, maximum dose, and local protocol before giving any medicine. Active role: ${widget.role}',
-                    ),
-                    style: const TextStyle(
-                      color: Color(0xFF9B2C2C),
-                      fontSize: 12,
-                      height: 1.45,
-                    ),
-                  ),
-                ),
-                if (items.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Center(
-                      child: Text(tr('لا توجد نتائج', 'No results')),
-                    ),
-                  ),
-                for (final formula in items)
-                  _FormulaCard(
-                    key: ValueKey(formula.enTitle),
-                    formula: formula,
-                    isArabic: _isArabic,
-                  ),
+              Switch(
+                value: _isArabic,
+                onChanged: (value) {
+                  setState(() => _isArabic = value);
+                  widget.onLanguageChanged(value);
+                },
+              ),
+              const SizedBox(width: 8),
+            ],
+            bottom: TabBar(
+              labelColor: _purple,
+              indicatorColor: _purple,
+              tabs: [
+                Tab(text: tr('المعادلات الطبية', 'Medical Formulas')),
+                const Tab(text: 'parameters'),
+                const Tab(text: 'scores'),
               ],
             ),
+          ),
+          body: TabBarView(
+            children: [
+              _tabBody(_formulasTab(items)),
+              _tabBody([PediatricParametersSection(isArabic: _isArabic)]),
+              _tabBody([const ClinicalScoresSection()]),
+            ],
           ),
         ),
       ),
     );
   }
+
+  Widget _tabBody(List<Widget> children) => Center(
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 900),
+      child: ListView(padding: const EdgeInsets.all(16), children: children),
+    ),
+  );
+
+  List<Widget> _formulasTab(List<_Formula> items) => [
+    TextField(
+      onChanged: (value) => setState(() => _search = value),
+      decoration: InputDecoration(
+        prefixIcon: const Icon(Icons.search),
+        hintText: tr('ابحث عن معادلة...', 'Search formulas...'),
+        filled: true,
+        fillColor: Colors.white,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+      ),
+    ),
+    Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Text(
+        tr(
+          'للمساعدة السريرية فقط وليست وصفة علاجية. راجع التشخيص، العمر، الحساسية، وظائف الكلى والكبد، التركيز، الحد الأقصى، والبروتوكول المحلي قبل إعطاء أي دواء. الدور الحالي: ${widget.role}',
+          'Clinical support only, not a prescription. Verify diagnosis, age, allergies, renal/hepatic function, concentration, maximum dose, and local protocol before giving any medicine. Active role: ${widget.role}',
+        ),
+        style: const TextStyle(
+          color: Color(0xFF9B2C2C),
+          fontSize: 12,
+          height: 1.45,
+        ),
+      ),
+    ),
+    if (items.isEmpty)
+      Padding(
+        padding: const EdgeInsets.all(32),
+        child: Center(child: Text(tr('لا توجد نتائج', 'No results'))),
+      ),
+    for (final formula in items)
+      _FormulaCard(
+        key: ValueKey(formula.enTitle),
+        formula: formula,
+        isArabic: _isArabic,
+      ),
+  ];
 }
 
 class _FormulaCard extends StatefulWidget {

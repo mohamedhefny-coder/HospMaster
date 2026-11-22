@@ -123,12 +123,10 @@ class ServiceAccess {
   final bool isAdmin;
   final Map<HospService, AccessStatus> statuses;
 
-  Set<HospService> get approved => isAdmin
-      ? HospService.values.toSet()
-      : {
-          for (final entry in statuses.entries)
-            if (entry.value == AccessStatus.approved) entry.key,
-        };
+  Set<HospService> get approved => {
+    for (final entry in statuses.entries)
+      if (entry.value == AccessStatus.approved) entry.key,
+  };
 
   bool get hasAccess => approved.isNotEmpty;
 }
@@ -193,23 +191,6 @@ class ServiceAccessRepository {
 
   Future<void> remove(String id) async {
     await _client.from(_table).delete().eq('id', id);
-  }
-
-  /// Admin only: creates a confirmed account through the `admin-create-user`
-  /// Edge Function (it needs the service-role key) and approves [services].
-  Future<void> createUser(
-    String email,
-    String password,
-    Iterable<HospService> services,
-  ) async {
-    await _client.functions.invoke(
-      'admin-create-user',
-      body: {
-        'email': email.trim().toLowerCase(),
-        'password': password,
-        'services': [for (final service in services) service.key],
-      },
-    );
   }
 
   /// Pre-approves [services] for [email]. The user receives them when they

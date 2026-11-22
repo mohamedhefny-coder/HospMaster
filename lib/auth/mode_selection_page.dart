@@ -12,10 +12,15 @@ class ModeSelectionPage extends StatefulWidget {
     super.key,
     required this.dashboardBuilder,
     this.isArabic = true,
+    this.autoOpen = true,
   });
 
   final DashboardBuilder dashboardBuilder;
   final bool isArabic;
+
+  /// When false, a signed-in user stays on this page instead of being sent
+  /// straight to the dashboard (used when returning from the dashboard).
+  final bool autoOpen;
 
   @override
   State<ModeSelectionPage> createState() => _ModeSelectionPageState();
@@ -33,7 +38,9 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _signedIn) _openDashboard(context, isGuest: false);
+      if (mounted && widget.autoOpen && _signedIn) {
+        _openDashboard(context, isGuest: false);
+      }
     });
   }
 
@@ -63,9 +70,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
   Future<void> _subscriber(BuildContext context) async {
     if (!_signedIn) {
       await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => AuthPage(isArabic: isArabic, startWithSignIn: true),
-        ),
+        MaterialPageRoute<void>(builder: (_) => AuthPage(isArabic: isArabic)),
       );
     }
     if (context.mounted && _signedIn) {

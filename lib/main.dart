@@ -1,17 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:hospmaster/auth/account_button.dart';
-import 'package:hospmaster/auth/admin_access_page.dart';
 import 'package:hospmaster/auth/mode_selection_page.dart';
 import 'package:hospmaster/auth/service_access.dart';
 import 'package:hospmaster/clinic/obgyn_patient_form_page.dart';
 import 'package:hospmaster/clinic/pediatric_patient_form_page.dart';
 import 'package:hospmaster/parameters/medical_formulas_page.dart';
-import 'package:hospmaster/surgery/admin_access.dart';
 import 'package:hospmaster/surgery/oncology_surgery_page.dart';
 import 'package:hospmaster/surgery/patient_follow_up_sheet_page.dart';
 import 'package:hospmaster/surgery/surgery_department_page.dart';
 import 'package:hospmaster/surgery/supabase_config.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -76,13 +73,16 @@ class HospMasterApp extends StatelessWidget {
         fontFamily: _englishFontFamily,
         fontFamilyFallback: const ['Arial'],
       ),
-      home: ModeSelectionPage(
-        dashboardBuilder: (_, isGuest, services) =>
-            HospitalDashboard(isGuest: isGuest, services: services),
-      ),
+      home: const ModeSelectionPage(dashboardBuilder: _buildDashboard),
     );
   }
 }
+
+Widget _buildDashboard(
+  BuildContext context,
+  bool isGuest,
+  Set<HospService>? services,
+) => HospitalDashboard(isGuest: isGuest, services: services);
 
 class HospitalDashboard extends StatefulWidget {
   const HospitalDashboard({super.key, this.isGuest = false, this.services});
@@ -141,9 +141,6 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
   bool get _rtl => _isArabic;
 
   bool _can(HospService service) => widget.services?.contains(service) ?? true;
-  bool get _isAdmin =>
-      SurgerySupabaseConfig.isConfigured &&
-      isAdminUser(Supabase.instance.client.auth.currentUser);
   bool get _canSurgeryDepartments =>
       _can(HospService.generalSurgery) || _can(HospService.oncologySurgery);
   bool get _canHospital =>
@@ -449,10 +446,28 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
     );
   }
 
+  void _backToModes() {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(
+        builder: (_) => ModeSelectionPage(
+          dashboardBuilder: _buildDashboard,
+          isArabic: _isArabic,
+          autoOpen: false,
+        ),
+      ),
+      (_) => false,
+    );
+  }
+
   Widget _header(bool wide) {
     final controls = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        IconButton(
+          tooltip: tr('العودة إلى الأوضاع', 'Back to modes'),
+          onPressed: _backToModes,
+          icon: const Icon(Icons.home_outlined),
+        ),
         AccountButton(isArabic: _isArabic),
         OutlinedButton.icon(
           onPressed: () => setState(() => _isArabic = !_isArabic),
@@ -754,25 +769,6 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
                 onTap: _showParameters,
               ),
             ),
-            if (_isAdmin)
-              SizedBox(
-                width: wide ? 280 : double.infinity,
-                child: _managerCard(
-                  title: 'Admin Panel',
-                  arabicTitle: 'لوحة تحكم المدير',
-                  arabicDescription:
-                      'قبول طلبات المستخدمين وإنشاء الحسابات وإدارة الخدمات',
-                  description:
-                      'Approve user requests, create accounts, and manage services',
-                  icon: Icons.admin_panel_settings_outlined,
-                  colors: const [Color(0xFF334155), Color(0xFF0F172A)],
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => AdminAccessPage(isArabic: _isArabic),
-                    ),
-                  ),
-                ),
-              ),
           ],
         ),
       ],
