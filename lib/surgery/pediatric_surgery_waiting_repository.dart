@@ -2,6 +2,10 @@ import 'dart:async';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+// Doctor names are matched by exact string; data may hold "د.أحمد" or "د. أحمد".
+String _normalizeDoctor(String doctor) =>
+    doctor.replaceFirst(RegExp(r'^د\.\s*'), 'د. ');
+
 class PediatricSurgeryWaitingPatient {
   const PediatricSurgeryWaitingPatient({
     this.id,
@@ -41,7 +45,7 @@ class PediatricSurgeryWaitingPatient {
       name: (json['name'] ?? '') as String,
       age: (json['age'] ?? '') as String,
       diagnosis: (json['diagnosis'] ?? '') as String,
-      doctor: (json['doctor'] ?? '') as String,
+      doctor: _normalizeDoctor((json['doctor'] ?? '') as String),
       date: (json['date'] ?? '') as String,
       priority: (json['priority'] ?? '') as String,
       workflowStage: (json['workflow_stage'] ?? 'waiting') as String,

@@ -343,7 +343,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
   ];
   static const List<String> _sideOptions = ['ج.أيمن', 'ج.أيسر', 'الجانبان'];
   static const List<String> _doctorOptions = [
-    'د.أحمد أبو الحسب',
+    'د. أحمد أبو الحسب',
     'د. حمدي السيد',
     'د. عبد الرحمن جمعة',
   ];
@@ -2196,7 +2196,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
     final parsedDate = DateTime.tryParse(date);
     return parsedDate?.weekday == DateTime.tuesday
         ? 'د. حمدي السيد'
-        : 'د.أحمد أبو الحسب';
+        : 'د. أحمد أبو الحسب';
   }
 
   String _formatDate(DateTime date) {

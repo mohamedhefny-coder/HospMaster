@@ -1,5 +1,6 @@
 # Local Supabase credentials
 supabase.env.json
+scripts/migrate.env.json
 
 # Miscellaneous
 *.class
