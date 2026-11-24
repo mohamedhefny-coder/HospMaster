@@ -6,7 +6,6 @@ import 'package:hospmaster/surgery/patient_follow_up_sheet_page.dart';
 import 'package:hospmaster/surgery/pediatric_surgery_waiting_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -265,10 +264,17 @@ class _RenameDoctorDialogState extends State<_RenameDoctorDialog> {
 }
 
 class PediatricSurgeryDoctorsPage extends StatefulWidget {
-  const PediatricSurgeryDoctorsPage({super.key, this.guestPreview = false});
+  const PediatricSurgeryDoctorsPage({
+    super.key,
+    this.waitingRepository,
+    this.doctorsRepository,
+  });
 
-  /// Read-only empty template for guests: no doctor names and no data.
-  final bool guestPreview;
+  /// Guest mode passes in-memory repositories, so nothing is saved.
+  final PediatricSurgeryWaitingRepository? waitingRepository;
+  final PediatricSurgeryDoctorsRepository? doctorsRepository;
+
+  bool get isDemo => waitingRepository is DemoPediatricSurgeryWaitingRepository;
 
   @override
   State<PediatricSurgeryDoctorsPage> createState() =>
@@ -278,30 +284,19 @@ class PediatricSurgeryDoctorsPage extends StatefulWidget {
 class _PediatricSurgeryDoctorsPageState
     extends State<PediatricSurgeryDoctorsPage> {
   late final PediatricSurgeryWaitingRepository _repository =
-      PediatricSurgeryWaitingRepository();
+      widget.waitingRepository ?? PediatricSurgeryWaitingRepository();
   late final PediatricSurgeryDoctorsRepository _doctorsRepository =
-      PediatricSurgeryDoctorsRepository();
+      widget.doctorsRepository ?? PediatricSurgeryDoctorsRepository();
   List<PediatricSurgeryWaitingPatient> _patients = const [];
-  List<_PediatricDoctor> _doctors = [..._defaultPediatricSurgeryDoctors];
+  late List<_PediatricDoctor> _doctors = widget.isDemo
+      ? const []
+      : [..._defaultPediatricSurgeryDoctors];
 
-  bool get _isAdmin =>
-      !widget.guestPreview &&
-      isAdminUser(Supabase.instance.client.auth.currentUser);
+  bool get _isAdmin => widget.isDemo || isCurrentUserAdmin();
 
   @override
   void initState() {
     super.initState();
-    if (widget.guestPreview) {
-      _doctors = [
-        for (var i = 0; i < 2; i++)
-          _PediatricDoctor(
-            name: 'قائمة الطبيب ${i + 1}',
-            colors: _defaultPediatricSurgeryDoctors[i].colors,
-            accent: _defaultPediatricSurgeryDoctors[i].accent,
-          ),
-      ];
-      return;
-    }
     _loadDoctors();
     _loadPatients();
   }
@@ -345,10 +340,8 @@ class _PediatricSurgeryDoctorsPageState
       MaterialPageRoute(
         builder: (_) => PediatricSurgeryPage(
           doctor: doctor,
-          guestPreview: widget.guestPreview,
-          doctorOptions: widget.guestPreview
-              ? const []
-              : _doctors.map((d) => d.name).toList(growable: false),
+          waitingRepository: widget.isDemo ? _repository : null,
+          doctorOptions: _doctors.map((d) => d.name).toList(growable: false),
         ),
       ),
     );
@@ -454,13 +447,7 @@ class _PediatricSurgeryDoctorsPageState
           for (final image in patient.images)
             if (image['path'] is String) image['path'] as String,
       ];
-      if (imagePaths.isNotEmpty) {
-        try {
-          await Supabase.instance.client.storage
-              .from('pediatric_surgery_patient_images')
-              .remove(imagePaths);
-        } catch (_) {}
-      }
+      if (imagePaths.isNotEmpty) await _repository.removeImages(imagePaths);
       await _repository.deletePatients([
         for (final patient in doctorPatients)
           if (patient.id != null) patient.id!,
@@ -490,10 +477,10 @@ class _PediatricSurgeryDoctorsPageState
                 waitingCount: _countForStage('waiting'),
                 followUpCount: _countForStage('follow_up'),
                 admissionCount: _countForStage('admission'),
-                showDoctorName: !widget.guestPreview,
+                showDoctorName: !widget.isDemo,
               ),
               const SizedBox(height: 12),
-              if (widget.guestPreview)
+              if (widget.isDemo) ...[
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -501,23 +488,24 @@ class _PediatricSurgeryDoctorsPageState
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: const Text(
-                    'نموذج فارغ للاطلاع فقط. سجّل الدخول كمشترك لاستخدام قوائم الانتظار.',
+                    'نسخة تجريبية: أي بيانات تضيفها هنا مؤقتة وتُحذف بمجرد خروجك من الموقع. سجّل الدخول كمشترك لحفظ بياناتك.',
                     textAlign: TextAlign.center,
                   ),
-                )
-              else
-                FilledButton.icon(
-                  onPressed: _addDoctor,
-                  icon: const Icon(Icons.person_add_alt_1_rounded),
-                  label: const Text('إضافة طبيب جديد وإدارة قائمته'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF16324F),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              FilledButton.icon(
+                onPressed: _addDoctor,
+                icon: const Icon(Icons.person_add_alt_1_rounded),
+                label: const Text('إضافة طبيب جديد وإدارة قائمته'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF16324F),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
                   ),
                 ),
+              ),
               const SizedBox(height: 16),
               for (final doctor in _doctors) ...[
                 _ModernDoctorCard(
@@ -546,11 +534,13 @@ class PediatricSurgeryPage extends StatefulWidget {
     super.key,
     this.doctor,
     this.doctorOptions = const [],
-    this.guestPreview = false,
+    this.waitingRepository,
   });
 
-  /// Empty, read-only template shown to guests (no data is loaded).
-  final bool guestPreview;
+  /// Guest mode passes an in-memory repository, so nothing is saved.
+  final PediatricSurgeryWaitingRepository? waitingRepository;
+
+  bool get isDemo => waitingRepository is DemoPediatricSurgeryWaitingRepository;
 
   /// When set, the page only shows and creates patients for this doctor.
   final String? doctor;
@@ -571,7 +561,6 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
   static const String _stagePicu = 'picu';
   static const String _stageNicu = 'nicu';
   static const String _stageEmergency = 'emergency';
-  static const String _patientImagesBucket = 'pediatric_surgery_patient_images';
   final List<String> _diagnosisOptions = [
     'فتق اربي',
     'فتق سري',
@@ -587,13 +576,13 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
   ];
 
   List<String> get _doctorOptions => {
-    ..._builtInDoctorOptions,
+    if (!widget.isDemo) ..._builtInDoctorOptions,
     ...widget.doctorOptions,
   }.toList(growable: false);
 
   late final TabController _tabController;
   late final PediatricSurgeryWaitingRepository _waitingRepository =
-      PediatricSurgeryWaitingRepository();
+      widget.waitingRepository ?? PediatricSurgeryWaitingRepository();
   int _currentTabIndex = 0;
   List<_WaitingPatient> _waitingPatients = const [];
   final Map<int, ScrollPosition> _tabScrollPositions = {};
@@ -605,7 +594,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
   bool _isSavingPatient = false;
   String? _patientsError;
 
-  bool get _isAdmin => isAdminUser(Supabase.instance.client.auth.currentUser);
+  bool get _isAdmin => widget.isDemo || isCurrentUserAdmin();
 
   final ValueNotifier<ScrollPosition?> _activeScrollPosition =
       ValueNotifier<ScrollPosition?>(null);
@@ -681,11 +670,10 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
   };
 
   bool get _canAddPatientFromCurrentTab =>
-      !widget.guestPreview &&
-      (_currentTabIndex == 0 ||
-          _currentTabIndex == 5 ||
-          _currentTabIndex == 6 ||
-          _currentTabIndex == 7);
+      _currentTabIndex == 0 ||
+      _currentTabIndex == 5 ||
+      _currentTabIndex == 6 ||
+      _currentTabIndex == 7;
 
   List<Color> _tabGradientForIndex(int index) => switch (index) {
     0 => const [Color(0xFFD8F5E8), Color(0xFFB5E8D1)],
@@ -724,11 +712,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
   @override
   void initState() {
     super.initState();
-    if (widget.guestPreview) {
-      _isLoadingPatients = false;
-    } else {
-      _loadWaitingPatients();
-    }
+    _loadWaitingPatients();
     _tabController = TabController(length: 8, vsync: this)
       ..addListener(() {
         if (_tabController.indexIsChanging) return;
@@ -1265,10 +1249,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                     fit: BoxFit.contain,
                   );
                 } else {
-                  final url = await Supabase.instance.client.storage
-                      .from(_patientImagesBucket)
-                      .createSignedUrl(attachment.path!, 60 * 60);
-                  page = _NetworkZoomImage(url: url);
+                  page = await _storedImagePage(attachment.path!);
                 }
                 if (!dialogContext.mounted) return;
                 await showDialog<void>(
@@ -2053,11 +2034,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
           .where((path) => !retainedPaths.contains(path))
           .toList();
       if (removedPaths.isNotEmpty) {
-        try {
-          await Supabase.instance.client.storage
-              .from(_patientImagesBucket)
-              .remove(removedPaths);
-        } catch (_) {}
+        await _waitingRepository.removeImages(removedPaths);
       }
 
       if (!mounted) return;
@@ -2070,18 +2047,16 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            isEditing ? 'تم تحديث بيانات المريض' : 'تم حفظ المريض في Supabase',
+            isEditing
+                ? 'تم تحديث بيانات المريض'
+                : widget.isDemo
+                ? 'تمت الإضافة تجريبياً (تُحذف عند الخروج)'
+                : 'تم حفظ المريض في Supabase',
           ),
         ),
       );
     } catch (error) {
-      try {
-        if (uploadedPaths.isNotEmpty) {
-          await Supabase.instance.client.storage
-              .from(_patientImagesBucket)
-              .remove(uploadedPaths);
-        }
-      } catch (_) {}
+      await _waitingRepository.removeImages(uploadedPaths);
       if (!mounted) return;
 
       setState(() {
@@ -2098,7 +2073,6 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
       throw Exception('حجم الصورة يتجاوز الحد المسموح (10 ميجابايت)');
     }
 
-    final safeName = image.name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
     final extension = image.name.split('.').last.toLowerCase();
     final contentType =
         image.mimeType ??
@@ -2108,25 +2082,19 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
           'heic' => 'image/heic',
           _ => 'image/jpeg',
         };
-    final path = 'patients/${DateTime.now().microsecondsSinceEpoch}_$safeName';
-    await Supabase.instance.client.storage
-        .from(_patientImagesBucket)
-        .uploadBinary(
-          path,
-          bytes,
-          fileOptions: FileOptions(contentType: contentType, upsert: false),
-        );
-    return path;
+    return _waitingRepository.uploadImage(bytes, image.name, contentType);
+  }
+
+  Future<Widget> _storedImagePage(String path) async {
+    final bytes = await _waitingRepository.memoryImage(path);
+    if (bytes != null) return Image.memory(bytes, fit: BoxFit.contain);
+    return _NetworkZoomImage(url: await _waitingRepository.imageUrl(path));
   }
 
   Future<void> _showPatientImages(_WaitingPatient patient) async {
     try {
-      final imageUrls = await Future.wait(
-        patient.images.map(
-          (image) => Supabase.instance.client.storage
-              .from(_patientImagesBucket)
-              .createSignedUrl(image.path!, 60 * 60),
-        ),
+      final imagePages = await Future.wait(
+        patient.images.map((image) => _storedImagePage(image.path!)),
       );
       if (!mounted) return;
 
@@ -2134,7 +2102,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
         context: context,
         builder: (context) => _ImageViewerDialog(
           title: 'صور ${patient.name}',
-          pages: [for (final url in imageUrls) _NetworkZoomImage(url: url)],
+          pages: imagePages,
           captions: [
             for (final image in patient.images)
               'تاريخ الرفع: ${image.uploadDate}',
@@ -2186,13 +2154,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
           .map((image) => image.path)
           .whereType<String>()
           .toList();
-      if (imagePaths.isNotEmpty) {
-        try {
-          await Supabase.instance.client.storage
-              .from(_patientImagesBucket)
-              .remove(imagePaths);
-        } catch (_) {}
-      }
+      await _waitingRepository.removeImages(imagePaths);
       if (!mounted) return;
 
       setState(() {
@@ -2769,9 +2731,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                           if (_currentTabIndex == 0)
                             Expanded(
                               child: OutlinedButton.icon(
-                                onPressed: widget.guestPreview
-                                    ? null
-                                    : _showPatientSearchDialog,
+                                onPressed: _showPatientSearchDialog,
                                 icon: const Icon(Icons.search_rounded),
                                 label: Text(
                                   _searchQuery.isNotEmpty
@@ -2801,8 +2761,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                             )
                           else
                             const Spacer(),
-                          if (_currentTabIndex <= 3 &&
-                              !widget.guestPreview) ...[
+                          if (_currentTabIndex <= 3) ...[
                             const SizedBox(width: 8),
                             IconButton.filledTonal(
                               tooltip: 'تصدير بيانات مرضى التبويب إلى Excel',
@@ -2953,9 +2912,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                           _setTabScrollPosition(0, position),
                       title: 'قائمة الانتظار',
                       emptyTitle: 'لا توجد حالات في قائمة الانتظار',
-                      emptyDescription: widget.guestPreview
-                          ? 'نموذج فارغ للاطلاع فقط.'
-                          : 'استخدم زر الإضافة لإدخال أول مريض.',
+                      emptyDescription: 'استخدم زر الإضافة لإدخال أول مريض.',
                       emptyIcon: Icons.inbox_outlined,
                       patients: _waitingStagePatients,
                       isLoading: _isLoadingPatients,

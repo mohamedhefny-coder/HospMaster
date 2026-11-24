@@ -133,3 +133,62 @@ class SurgeryPatientRepository {
     }
   }
 }
+
+/// In-memory stand-in used in guest mode: nothing is sent to Supabase and
+/// everything is lost when the user leaves.
+class DemoSurgeryPatientRepository extends SurgeryPatientRepository {
+  DemoSurgeryPatientRepository();
+
+  final List<Map<String, dynamic>> _rows = [];
+  final Map<String, Uint8List> _files = {};
+  int _nextId = 1;
+
+  @override
+  Future<List<PatientRecord>> fetchPatients(String department) async => [
+    for (final row in _rows.reversed)
+      if (row['department'] == department) PatientRecord.fromJson(row),
+  ];
+
+  @override
+  Future<PatientRecord> savePatient(PatientRecord patient) async {
+    final now = DateTime.now().toUtc().toIso8601String();
+    final id = patient.id;
+    final index = id == null ? -1 : _rows.indexWhere((r) => r['id'] == id);
+    final row = {
+      ...patient.toJson(),
+      'id': id ?? 'demo-${_nextId++}',
+      'created_at': index >= 0 ? _rows[index]['created_at'] : now,
+      'updated_at': now,
+    };
+    if (index >= 0) {
+      _rows[index] = row;
+    } else {
+      _rows.add(row);
+    }
+    return PatientRecord.fromJson(row);
+  }
+
+  @override
+  Future<void> deletePatient(PatientRecord patient) async {
+    _rows.removeWhere((row) => row['id'] == patient.id);
+    await removeFiles(patient.filePaths);
+  }
+
+  @override
+  Future<String> uploadFile(Uint8List bytes, String fileName) async {
+    final path = 'demo/${_nextId++}_$fileName';
+    _files[path] = bytes;
+    return path;
+  }
+
+  @override
+  Future<Uint8List> downloadFile(String path) async {
+    final bytes = _files[path];
+    if (bytes == null) throw StateError('File not found.');
+    return bytes;
+  }
+
+  @override
+  Future<void> removeFiles(List<String> paths) async =>
+      paths.forEach(_files.remove);
+}

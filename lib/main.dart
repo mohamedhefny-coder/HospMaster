@@ -7,6 +7,8 @@ import 'package:hospmaster/clinic/pediatric_patient_form_page.dart';
 import 'package:hospmaster/parameters/medical_formulas_page.dart';
 import 'package:hospmaster/surgery/oncology_surgery_page.dart';
 import 'package:hospmaster/surgery/patient_follow_up_sheet_page.dart';
+import 'package:hospmaster/surgery/patient_repository.dart';
+import 'package:hospmaster/surgery/pediatric_surgery_waiting_repository.dart';
 import 'package:hospmaster/surgery/surgery_department_page.dart';
 import 'package:hospmaster/surgery/supabase_config.dart';
 
@@ -967,8 +969,13 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
                   description: 'Surgery waiting list and follow-up',
                   icon: Icons.local_hospital_outlined,
                   colors: const [Color(0xFF1E6FD9), Color(0xFF22A38A)],
-                  onTap: () =>
-                      _openSurgeryPage((_) => const PatientFollowUpSheetPage()),
+                  onTap: () => _openSurgeryPage(
+                    (_) => PatientFollowUpSheetPage(
+                      repository: widget.isGuest
+                          ? _demoSurgeryRepository
+                          : null,
+                    ),
+                  ),
                 ),
               ),
             if (_can(HospService.oncologySurgery))
@@ -982,8 +989,13 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
                       'Register and follow up oncology surgery patients',
                   icon: Icons.healing_outlined,
                   colors: const [Color(0xFF7A4CB3), Color(0xFF513086)],
-                  onTap: () =>
-                      _openSurgeryPage((_) => const OncologySurgeryPage()),
+                  onTap: () => _openSurgeryPage(
+                    (_) => OncologySurgeryPage(
+                      repository: widget.isGuest
+                          ? _demoSurgeryRepository
+                          : null,
+                    ),
+                  ),
                 ),
               ),
           ],
@@ -1034,17 +1046,16 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
                 description: 'Pediatric surgery waiting list by doctor',
                 icon: Icons.child_care_outlined,
                 colors: const [Color(0xFFF59E0B), Color(0xFFEF4444)],
-                onTap: () => widget.isGuest
-                    ? Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const PediatricSurgeryDoctorsPage(
-                            guestPreview: true,
-                          ),
-                        ),
-                      )
-                    : _openSurgeryPage(
-                        (_) => const PediatricSurgeryDoctorsPage(),
-                      ),
+                onTap: () => _openSurgeryPage(
+                  (_) => PediatricSurgeryDoctorsPage(
+                    waitingRepository: widget.isGuest
+                        ? _demoWaitingRepository
+                        : null,
+                    doctorsRepository: widget.isGuest
+                        ? _demoDoctorsRepository
+                        : null,
+                  ),
+                ),
               ),
             ),
           ],
@@ -1053,8 +1064,13 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
     );
   }
 
+  final _demoSurgeryRepository = DemoSurgeryPatientRepository();
+  final _demoWaitingRepository = DemoPediatricSurgeryWaitingRepository();
+  final _demoDoctorsRepository = DemoPediatricSurgeryDoctorsRepository();
+
   void _openSurgeryPage(WidgetBuilder builder) {
-    if (!SurgerySupabaseConfig.isConfigured) {
+    // Guests get in-memory demo data, so Supabase is not needed.
+    if (!widget.isGuest && !SurgerySupabaseConfig.isConfigured) {
       showDialog<void>(
         context: context,
         builder: (context) => Directionality(

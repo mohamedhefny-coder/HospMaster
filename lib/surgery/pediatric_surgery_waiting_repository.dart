@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -100,12 +101,46 @@ class PediatricSurgeryWaitingPatient {
 
 class PediatricSurgeryWaitingRepository {
   PediatricSurgeryWaitingRepository({SupabaseClient? client})
-    : _client = client ?? Supabase.instance.client;
+    : _clientOverride = client;
 
-  final SupabaseClient _client;
+  final SupabaseClient? _clientOverride;
+
+  SupabaseClient get _client => _clientOverride ?? Supabase.instance.client;
 
   static const String _tableName = 'pediatric_surgery_waiting_patients';
+  static const String _imagesBucket = 'pediatric_surgery_patient_images';
   static const Duration _requestTimeout = Duration(seconds: 45);
+
+  /// Uploads a patient image and returns its storage path.
+  Future<String> uploadImage(
+    Uint8List bytes,
+    String fileName,
+    String contentType,
+  ) async {
+    final safeName = fileName.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+    final path = 'patients/${DateTime.now().microsecondsSinceEpoch}_$safeName';
+    await _client.storage
+        .from(_imagesBucket)
+        .uploadBinary(
+          path,
+          bytes,
+          fileOptions: FileOptions(contentType: contentType, upsert: false),
+        );
+    return path;
+  }
+
+  Future<String> imageUrl(String path) =>
+      _client.storage.from(_imagesBucket).createSignedUrl(path, 60 * 60);
+
+  /// Image bytes held in memory (demo mode only); `null` means use [imageUrl].
+  Future<Uint8List?> memoryImage(String path) async => null;
+
+  Future<void> removeImages(List<String> paths) async {
+    if (paths.isEmpty) return;
+    try {
+      await _client.storage.from(_imagesBucket).remove(paths);
+    } catch (_) {}
+  }
 
   Future<List<PediatricSurgeryWaitingPatient>> fetchPatients() async {
     final response = await _client
@@ -189,9 +224,11 @@ class PediatricSurgeryWaitingRepository {
 
 class PediatricSurgeryDoctorsRepository {
   PediatricSurgeryDoctorsRepository({SupabaseClient? client})
-    : _client = client ?? Supabase.instance.client;
+    : _clientOverride = client;
 
-  final SupabaseClient _client;
+  final SupabaseClient? _clientOverride;
+
+  SupabaseClient get _client => _clientOverride ?? Supabase.instance.client;
 
   static const String _tableName = 'pediatric_surgery_doctors';
   static const Duration _requestTimeout = Duration(seconds: 45);
@@ -238,4 +275,130 @@ class PediatricSurgeryDoctorsRepository {
       throw StateError('Doctor was not deleted.');
     }
   }
+}
+
+/// In-memory stand-in used in guest mode: nothing is sent to Supabase and
+/// everything is lost when the user leaves.
+class DemoPediatricSurgeryWaitingRepository
+    extends PediatricSurgeryWaitingRepository {
+  DemoPediatricSurgeryWaitingRepository();
+
+  final List<PediatricSurgeryWaitingPatient> _patients = [];
+  final Map<String, Uint8List> _images = {};
+  int _nextId = 1;
+
+  PediatricSurgeryWaitingPatient _build(
+    Map<String, dynamic> json,
+    String id,
+    DateTime createdAt,
+  ) => PediatricSurgeryWaitingPatient.fromJson({
+    ...json,
+    'id': id,
+    'created_at': createdAt.toIso8601String(),
+  });
+
+  @override
+  Future<List<PediatricSurgeryWaitingPatient>> fetchPatients() async {
+    final sorted = [..._patients]
+      ..sort((a, b) {
+        final byDate = a.date.compareTo(b.date);
+        if (byDate != 0) return byDate;
+        return (a.createdAt ?? DateTime(0)).compareTo(
+          b.createdAt ?? DateTime(0),
+        );
+      });
+    return sorted;
+  }
+
+  @override
+  Future<PediatricSurgeryWaitingPatient> addPatient(
+    PediatricSurgeryWaitingPatient patient,
+  ) async {
+    final saved = _build(
+      patient.toInsertJson(),
+      'demo-${_nextId++}',
+      DateTime.now(),
+    );
+    _patients.add(saved);
+    return saved;
+  }
+
+  @override
+  Future<PediatricSurgeryWaitingPatient> updatePatient(
+    PediatricSurgeryWaitingPatient patient,
+  ) async {
+    final index = _patients.indexWhere((item) => item.id == patient.id);
+    if (index < 0) throw StateError('Patient not found.');
+    final saved = _build(
+      patient.toUpdateJson(),
+      patient.id!,
+      _patients[index].createdAt ?? DateTime.now(),
+    );
+    _patients[index] = saved;
+    return saved;
+  }
+
+  @override
+  Future<void> deletePatient(String id) async =>
+      _patients.removeWhere((item) => item.id == id);
+
+  @override
+  Future<void> deletePatients(List<String> ids) async =>
+      _patients.removeWhere((item) => ids.contains(item.id));
+
+  @override
+  Future<void> setDoctorForPatients(List<String> ids, String doctor) async {
+    for (var i = 0; i < _patients.length; i++) {
+      final patient = _patients[i];
+      if (!ids.contains(patient.id)) continue;
+      _patients[i] = _build(
+        {...patient.toUpdateJson(), 'doctor': doctor},
+        patient.id!,
+        patient.createdAt ?? DateTime.now(),
+      );
+    }
+  }
+
+  @override
+  Future<String> uploadImage(
+    Uint8List bytes,
+    String fileName,
+    String contentType,
+  ) async {
+    final path = 'demo/${_nextId++}_$fileName';
+    _images[path] = bytes;
+    return path;
+  }
+
+  @override
+  Future<String> imageUrl(String path) async => path;
+
+  @override
+  Future<Uint8List?> memoryImage(String path) async => _images[path];
+
+  @override
+  Future<void> removeImages(List<String> paths) async =>
+      paths.forEach(_images.remove);
+}
+
+class DemoPediatricSurgeryDoctorsRepository
+    extends PediatricSurgeryDoctorsRepository {
+  DemoPediatricSurgeryDoctorsRepository();
+
+  final List<String> _names = ['قائمة الطبيب 1', 'قائمة الطبيب 2'];
+
+  @override
+  Future<List<String>> fetchDoctorNames() async => [..._names];
+
+  @override
+  Future<void> addDoctor(String name) async => _names.add(name);
+
+  @override
+  Future<void> renameDoctor(String oldName, String newName) async {
+    final index = _names.indexOf(oldName);
+    if (index >= 0) _names[index] = newName;
+  }
+
+  @override
+  Future<void> deleteDoctor(String name) async => _names.remove(name);
 }
