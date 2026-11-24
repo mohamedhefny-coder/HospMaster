@@ -1346,6 +1346,9 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                   images: List<_PatientImageAttachment>.from(patientImages),
                   operationListDate: initialPatient?.operationListDate,
                   callStatus: initialPatient?.callStatus ?? '',
+                  opDetails: initialPatient?.opDetails ?? const [],
+                  hasOpDetailsColumn:
+                      initialPatient?.hasOpDetailsColumn ?? false,
                 ),
               );
             }
@@ -2516,13 +2519,71 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
   Future<void> _showPatientDetails(_WaitingPatient patient) {
     return showDialog<void>(
       context: context,
+      barrierDismissible: false,
       builder: (_) => _PatientDetailsDialog(
         patient: patient,
         imagePage: _storedImagePage,
-        onEdit: () => _showAddPatientDialog(patient),
-        onOpenImages: () => _showPatientImages(patient),
+        formatDate: _formatDate,
+        onSave: (updated) => _savePatientDetails(patient, updated),
+        onEditBasics: () => _showAddPatientDialog(patient),
       ),
     );
+  }
+
+  Future<bool> _savePatientDetails(
+    _WaitingPatient original,
+    _WaitingPatient updated,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final uploadedPaths = <String>[];
+    try {
+      final savedImages = <_PatientImageAttachment>[];
+      for (final image in updated.images) {
+        if (image.localFile == null) {
+          savedImages.add(image);
+          continue;
+        }
+        final path = await _uploadPatientImage(image.localFile!);
+        uploadedPaths.add(path);
+        savedImages.add(image.copyWith(path: path, clearLocalFile: true));
+      }
+
+      final saved = await _waitingRepository.updatePatient(
+        updated.copyWith(images: savedImages).toRepositoryModel(),
+      );
+
+      final retained = savedImages
+          .map((image) => image.path)
+          .whereType<String>()
+          .toSet();
+      await _waitingRepository.removeImages(
+        original.images
+            .map((image) => image.path)
+            .whereType<String>()
+            .where((path) => !retained.contains(path))
+            .toList(),
+      );
+      if (mounted) {
+        setState(
+          () => _upsertLocalPatient(_WaitingPatient.fromRepository(saved)),
+        );
+      }
+      messenger.showSnackBar(const SnackBar(content: Text('تم حفظ التفاصيل')));
+      return true;
+    } catch (error) {
+      await _waitingRepository.removeImages(uploadedPaths);
+      final missingColumn = '$error'.contains('op_details');
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            missingColumn
+                ? 'شغّل ملف 20261124_pediatric_op_details.sql في Supabase أولاً'
+                : 'فشل الحفظ: $error',
+          ),
+        ),
+      );
+      return false;
+    }
   }
 
   Widget _buildPatientCardForStage(
@@ -5130,39 +5191,178 @@ String _workflowStageLabel(String stage) => switch (stage) {
   _ => 'الانتظار',
 };
 
-/// Read-only summary of a patient, opened by tapping the patient card.
+/// Opened by tapping a patient card: dated operation lines, pictures and notes
+/// that can all be edited and saved.
 class _PatientDetailsDialog extends StatefulWidget {
   const _PatientDetailsDialog({
     required this.patient,
     required this.imagePage,
-    required this.onEdit,
-    required this.onOpenImages,
+    required this.formatDate,
+    required this.onSave,
+    required this.onEditBasics,
   });
 
   final _WaitingPatient patient;
   final Future<Widget> Function(String path) imagePage;
-  final VoidCallback onEdit;
-  final VoidCallback onOpenImages;
+  final String Function(DateTime date) formatDate;
+  final Future<bool> Function(_WaitingPatient updated) onSave;
+  final VoidCallback onEditBasics;
 
   @override
   State<_PatientDetailsDialog> createState() => _PatientDetailsDialogState();
 }
 
+class _OpLine {
+  _OpLine(this.date, String text)
+    : controller = TextEditingController(text: text);
+
+  String date;
+  final TextEditingController controller;
+}
+
 class _PatientDetailsDialogState extends State<_PatientDetailsDialog> {
   static const _teal = Color(0xFF087E8B);
-  late final List<Future<Widget>> _thumbnails = [
-    for (final image in widget.patient.images)
-      if (image.path != null) widget.imagePage(image.path!),
+  late final List<_OpLine> _lines = [
+    for (final entry in widget.patient.opDetails)
+      _OpLine(entry.date, entry.text),
   ];
+  late final TextEditingController _notes = TextEditingController(
+    text: widget.patient.notes,
+  );
+  late final List<_PatientImageAttachment> _images = [...widget.patient.images];
+  final Map<String, Future<Widget>> _thumbnails = {};
+  bool _changed = false;
+  bool _saving = false;
 
-  Widget _section(String title, IconData icon, Widget child) {
+  @override
+  void dispose() {
+    for (final line in _lines) {
+      line.controller.dispose();
+    }
+    _notes.dispose();
+    super.dispose();
+  }
+
+  void _markChanged() {
+    if (!_changed) setState(() => _changed = true);
+  }
+
+  Future<void> _pickDate(String current, ValueChanged<String> onPicked) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.tryParse(current) ?? DateTime.now(),
+      firstDate: DateTime(1900),
+      lastDate: DateTime(2100),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _changed = true;
+      onPicked(widget.formatDate(picked));
+    });
+  }
+
+  Future<void> _addImages() async {
+    final picked = await ImagePicker().pickMultiImage(
+      imageQuality: 85,
+      maxWidth: 2048,
+      maxHeight: 2048,
+    );
+    if (picked.isEmpty || !mounted) return;
+    setState(() {
+      _changed = true;
+      _images.addAll(
+        picked.map(
+          (file) => _PatientImageAttachment(
+            uploadDate: widget.formatDate(DateTime.now()),
+            localFile: file,
+          ),
+        ),
+      );
+    });
+  }
+
+  Future<Widget> _thumbnailFor(_PatientImageAttachment image) {
+    final key = image.localFile?.path ?? image.path!;
+    return _thumbnails.putIfAbsent(key, () async {
+      final local = image.localFile;
+      if (local != null) {
+        return Image.memory(await local.readAsBytes(), fit: BoxFit.cover);
+      }
+      return widget.imagePage(image.path!);
+    });
+  }
+
+  Future<void> _preview(_PatientImageAttachment image) async {
+    final local = image.localFile;
+    final page = local != null
+        ? Image.memory(await local.readAsBytes(), fit: BoxFit.contain)
+        : await widget.imagePage(image.path!);
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _ImageViewerDialog(
+        title: 'صورة المريض',
+        pages: [page],
+        captions: ['تاريخ الرفع: ${image.uploadDate}'],
+      ),
+    );
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    final updated = widget.patient.copyWith(
+      notes: _notes.text.trim(),
+      images: List<_PatientImageAttachment>.from(_images),
+      opDetails: [
+        for (final line in _lines)
+          if (line.controller.text.trim().isNotEmpty)
+            _OpDetailEntry(date: line.date, text: line.controller.text.trim()),
+      ],
+    );
+    final saved = await widget.onSave(updated);
+    if (!mounted) return;
+    if (saved) {
+      Navigator.of(context).pop();
+    } else {
+      setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _close() async {
+    if (_changed) {
+      final discard = await showDialog<bool>(
+        context: context,
+        builder: (context) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            title: const Text('تجاهل التغييرات؟'),
+            content: const Text('لديك تغييرات غير محفوظة.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('متابعة التعديل'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('تجاهل'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (discard != true || !mounted) return;
+    }
+    Navigator.of(context).pop();
+  }
+
+  Widget _section(String title, IconData icon, List<Widget> children) {
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFFD9E7EB)),
       ),
       child: Column(
@@ -5184,44 +5384,144 @@ class _PatientDetailsDialogState extends State<_PatientDetailsDialog> {
             ],
           ),
           const SizedBox(height: 10),
-          child,
+          ...children,
         ],
       ),
     );
   }
 
-  Widget _row(String label, String value, {VoidCallback? onTap}) {
-    if (value.trim().isEmpty) return const SizedBox.shrink();
+  Widget _opLineRow(int index) {
+    final line = _lines[index];
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 112,
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontSize: 13,
-                color: Color(0xFF64748B),
-                fontWeight: FontWeight.w600,
+          InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: () => _pickDate(line.date, (value) => line.date = value),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 11),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE6F4F1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.calendar_month_outlined,
+                    size: 15,
+                    color: _teal,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    line.date.isEmpty ? 'تاريخ' : line.date,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: _teal,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
+          const SizedBox(width: 8),
           Expanded(
-            child: GestureDetector(
-              onTap: onTap,
-              child: Text(
-                value,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: onTap == null
-                      ? const Color(0xFF16324F)
-                      : const Color(0xFF15803D),
-                ),
+            child: TextField(
+              controller: line.controller,
+              minLines: 1,
+              maxLines: 4,
+              keyboardType: TextInputType.multiline,
+              onChanged: (_) => _markChanged(),
+              decoration: const InputDecoration(
+                hintText: 'تفاصيل العملية أو الحدث',
+                isDense: true,
+                border: OutlineInputBorder(),
               ),
             ),
+          ),
+          IconButton(
+            tooltip: 'حذف السطر',
+            visualDensity: VisualDensity.compact,
+            onPressed: () => setState(() {
+              _changed = true;
+              _lines.removeAt(index).controller.dispose();
+            }),
+            icon: const Icon(Icons.close_rounded, size: 18),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _imageTile(int index) {
+    final image = _images[index];
+    return SizedBox(
+      width: 92,
+      child: Column(
+        children: [
+          Stack(
+            children: [
+              GestureDetector(
+                onTap: () => _preview(image),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    width: 92,
+                    height: 92,
+                    color: const Color(0xFFE2E8F0),
+                    child: FutureBuilder<Widget>(
+                      future: _thumbnailFor(image),
+                      builder: (context, snapshot) =>
+                          snapshot.data ??
+                          Center(
+                            child: snapshot.hasError
+                                ? const Icon(Icons.broken_image_outlined)
+                                : const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                          ),
+                    ),
+                  ),
+                ),
+              ),
+              PositionedDirectional(
+                top: 2,
+                end: 2,
+                child: InkWell(
+                  onTap: () => setState(() {
+                    _changed = true;
+                    _images.removeAt(index);
+                  }),
+                  child: const CircleAvatar(
+                    radius: 11,
+                    backgroundColor: Color(0xCC0F172A),
+                    child: Icon(
+                      Icons.close_rounded,
+                      size: 14,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          TextButton(
+            style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              minimumSize: const Size(0, 28),
+            ),
+            onPressed: () => _pickDate(image.uploadDate, (value) {
+              _images[index] = image.copyWith(uploadDate: value);
+            }),
+            child: Text(image.uploadDate, style: const TextStyle(fontSize: 11)),
           ),
         ],
       ),
@@ -5232,210 +5532,201 @@ class _PatientDetailsDialogState extends State<_PatientDetailsDialog> {
   Widget build(BuildContext context) {
     final patient = widget.patient;
     final size = MediaQuery.sizeOf(context);
-    final priority = patient.priority.trim();
-    final callLabel = switch (patient.callStatus) {
-      'called' => 'called',
-      'no_reply' => 'no reply',
-      'closed' => 'closed',
-      _ => '',
-    };
+    final compact = size.width < 640;
+    final info = [
+      _workflowStageLabel(patient.workflowStage),
+      patient.currentAge,
+      patient.doctor,
+      patient.diagnosis,
+    ].where((part) => part.trim().isNotEmpty).join(' • ');
 
-    return Directionality(
+    final content = Directionality(
       textDirection: TextDirection.rtl,
-      child: Dialog(
-        insetPadding: const EdgeInsets.all(16),
-        clipBehavior: Clip.antiAlias,
+      child: Scaffold(
         backgroundColor: const Color(0xFFF4F8FA),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: 600,
-            maxHeight: size.height * 0.9,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Color(0xFF087E8B), Color(0xFF25A77F)],
-                    begin: Alignment.topRight,
-                    end: Alignment.bottomLeft,
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    const CircleAvatar(
-                      backgroundColor: Color(0x33FFFFFF),
-                      child: Icon(
-                        Icons.child_care_outlined,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            patient.name,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          Text(
-                            '${_workflowStageLabel(patient.workflowStage)} • ${patient.currentAge}',
-                            style: const TextStyle(
-                              color: Color(0xFFE5F7F4),
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'إغلاق',
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(
-                        Icons.close_rounded,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
+        body: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF087E8B), Color(0xFF25A77F)],
+                  begin: Alignment.topRight,
+                  end: Alignment.bottomLeft,
                 ),
               ),
-              Flexible(
-                child: ListView(
-                  shrinkWrap: true,
-                  padding: const EdgeInsets.all(14),
-                  children: [
-                    _section(
-                      'OP. Details',
-                      Icons.local_hospital_outlined,
-                      Column(
-                        children: [
-                          _row('التشخيص', patient.diagnosis),
-                          _row('الطبيب', patient.doctor),
-                          _row('تاريخ التسجيل', patient.date),
-                          _row('السن الآن', patient.currentAge),
-                          _row(
-                            'الهاتف',
-                            patient.phone,
-                            onTap: patient.phone.trim().isEmpty
-                                ? null
-                                : () => _callPhone(context, patient.phone),
+              child: Row(
+                children: [
+                  const CircleAvatar(
+                    backgroundColor: Color(0x33FFFFFF),
+                    child: Icon(Icons.child_care_outlined, color: Colors.white),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          patient.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
                           ),
-                          _row(
-                            'المرحلة',
-                            _workflowStageLabel(patient.workflowStage),
+                        ),
+                        Text(
+                          info,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xFFE5F7F4),
+                            fontSize: 12,
                           ),
-                          _row(
-                            'قائمة العمليات',
-                            patient.operationListDate ?? '',
-                          ),
-                          _row('حالة الاتصال', callLabel),
-                          _row('الأولوية', priority == 'جديد' ? '' : priority),
-                        ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'إغلاق',
+                    onPressed: _saving ? null : _close,
+                    icon: const Icon(Icons.close_rounded, color: Colors.white),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: const EdgeInsets.all(12),
+                children: [
+                  _section('OP. Details', Icons.local_hospital_outlined, [
+                    if (_lines.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          'لا توجد تفاصيل بعد. أضف سطراً لكل عملية أو حدث مع تاريخه.',
+                          style: TextStyle(color: Color(0xFF64748B)),
+                        ),
+                      ),
+                    for (var i = 0; i < _lines.length; i++) _opLineRow(i),
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: TextButton.icon(
+                        onPressed: () => setState(() {
+                          _changed = true;
+                          _lines.add(
+                            _OpLine(widget.formatDate(DateTime.now()), ''),
+                          );
+                        }),
+                        icon: const Icon(Icons.add_rounded),
+                        label: const Text('إضافة سطر'),
                       ),
                     ),
-                    _section(
-                      'Pictures',
-                      Icons.photo_library_outlined,
-                      _thumbnails.isEmpty
-                          ? const Text(
-                              'لا توجد صور',
-                              style: TextStyle(color: Color(0xFF64748B)),
-                            )
-                          : Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
+                  ]),
+                  _section('Pictures', Icons.photo_library_outlined, [
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (var i = 0; i < _images.length; i++) _imageTile(i),
+                        InkWell(
+                          onTap: _addImages,
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            width: 92,
+                            height: 92,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: _teal),
+                              color: const Color(0xFFE6F4F1),
+                            ),
+                            child: const Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                for (final thumbnail in _thumbnails)
-                                  GestureDetector(
-                                    onTap: widget.onOpenImages,
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: Container(
-                                        width: 104,
-                                        height: 104,
-                                        color: const Color(0xFF0F172A),
-                                        child: FutureBuilder<Widget>(
-                                          future: thumbnail,
-                                          builder: (context, snapshot) =>
-                                              snapshot.data ??
-                                              Center(
-                                                child: snapshot.hasError
-                                                    ? const Icon(
-                                                        Icons
-                                                            .broken_image_outlined,
-                                                        color: Colors.white70,
-                                                      )
-                                                    : const SizedBox(
-                                                        width: 20,
-                                                        height: 20,
-                                                        child:
-                                                            CircularProgressIndicator(
-                                                              strokeWidth: 2,
-                                                            ),
-                                                      ),
-                                              ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
+                                Icon(
+                                  Icons.add_photo_alternate_outlined,
+                                  color: _teal,
+                                ),
+                                SizedBox(height: 4),
+                                Text(
+                                  'إضافة صور',
+                                  style: TextStyle(color: _teal, fontSize: 12),
+                                ),
                               ],
                             ),
+                          ),
+                        ),
+                      ],
                     ),
-                    _section(
-                      'Notes',
-                      Icons.note_alt_outlined,
-                      patient.notes.trim().isEmpty
-                          ? const Text(
-                              'لا توجد ملاحظات',
-                              style: TextStyle(color: Color(0xFF64748B)),
-                            )
-                          : SelectableText(
-                              patient.notes,
-                              style: const TextStyle(fontSize: 14, height: 1.5),
+                  ]),
+                  _section('Notes', Icons.note_alt_outlined, [
+                    TextField(
+                      controller: _notes,
+                      minLines: 3,
+                      maxLines: 10,
+                      keyboardType: TextInputType.multiline,
+                      onChanged: (_) => _markChanged(),
+                      decoration: const InputDecoration(
+                        hintText: 'اكتب ملاحظاتك هنا',
+                        isDense: true,
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ]),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(top: BorderSide(color: Color(0xFFD9E7EB))),
+              ),
+              child: Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: _saving
+                        ? null
+                        : () {
+                            Navigator.of(context).pop();
+                            widget.onEditBasics();
+                          },
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    label: const Text('البيانات الأساسية'),
+                  ),
+                  const Spacer(),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(backgroundColor: _teal),
+                    onPressed: _saving ? null : _save,
+                    icon: _saving
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
                             ),
-                    ),
-                  ],
-                ),
+                          )
+                        : const Icon(Icons.save_outlined),
+                    label: const Text('حفظ'),
+                  ),
+                ],
               ),
-              Container(
-                padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  border: Border(top: BorderSide(color: Color(0xFFD9E7EB))),
-                ),
-                child: Row(
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('إغلاق'),
-                    ),
-                    const Spacer(),
-                    FilledButton.icon(
-                      style: FilledButton.styleFrom(backgroundColor: _teal),
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        widget.onEdit();
-                      },
-                      icon: const Icon(Icons.edit_outlined),
-                      label: const Text('تعديل'),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
+    );
+
+    if (compact) return Dialog.fullscreen(child: content);
+    return Dialog(
+      insetPadding: const EdgeInsets.all(24),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: SizedBox(width: 640, height: size.height * 0.9, child: content),
     );
   }
 }
@@ -6242,6 +6533,8 @@ class _WaitingPatient {
     this.operationListDate,
     this.callStatus = '',
     this.createdAt,
+    this.opDetails = const [],
+    this.hasOpDetailsColumn = false,
   });
 
   factory _WaitingPatient.fromRepository(
@@ -6264,6 +6557,10 @@ class _WaitingPatient {
       operationListDate: patient.operationListDate,
       callStatus: patient.callStatus,
       createdAt: patient.createdAt,
+      opDetails: patient.opDetails
+          .map(_OpDetailEntry.fromJson)
+          .toList(growable: false),
+      hasOpDetailsColumn: patient.hasOpDetailsColumn,
     );
   }
 
@@ -6281,6 +6578,8 @@ class _WaitingPatient {
   final String? operationListDate;
   final String callStatus;
   final DateTime? createdAt;
+  final List<_OpDetailEntry> opDetails;
+  final bool hasOpDetailsColumn;
 
   /// The stored age is the age on the registration date; this adds the time
   /// elapsed since then so the displayed age stays current.
@@ -6305,6 +6604,7 @@ class _WaitingPatient {
     bool clearOperationListDate = false,
     String? callStatus,
     DateTime? createdAt,
+    List<_OpDetailEntry>? opDetails,
   }) {
     return _WaitingPatient(
       id: id ?? this.id,
@@ -6323,6 +6623,8 @@ class _WaitingPatient {
           : operationListDate ?? this.operationListDate,
       callStatus: callStatus ?? this.callStatus,
       createdAt: createdAt ?? this.createdAt,
+      opDetails: opDetails ?? this.opDetails,
+      hasOpDetailsColumn: hasOpDetailsColumn,
     );
   }
 
@@ -6341,8 +6643,27 @@ class _WaitingPatient {
       images: images.map((image) => image.toJson()).toList(growable: false),
       operationListDate: operationListDate,
       callStatus: callStatus,
+      opDetails: opDetails
+          .map((entry) => entry.toJson())
+          .toList(growable: false),
+      hasOpDetailsColumn: hasOpDetailsColumn,
     );
   }
+}
+
+/// One dated line of a patient's operation / event log.
+class _OpDetailEntry {
+  const _OpDetailEntry({required this.date, required this.text});
+
+  factory _OpDetailEntry.fromJson(Map<String, dynamic> json) => _OpDetailEntry(
+    date: (json['date'] ?? '') as String,
+    text: (json['text'] ?? '') as String,
+  );
+
+  final String date;
+  final String text;
+
+  Map<String, dynamic> toJson() => {'date': date, 'text': text};
 }
 
 String _ageSinceRegistration({

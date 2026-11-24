@@ -23,6 +23,8 @@ class PediatricSurgeryWaitingPatient {
     this.operationListDate,
     this.callStatus = '',
     this.createdAt,
+    this.opDetails = const [],
+    this.hasOpDetailsColumn = false,
   });
 
   final String? id;
@@ -39,6 +41,14 @@ class PediatricSurgeryWaitingPatient {
   final String? operationListDate;
   final String callStatus;
   final DateTime? createdAt;
+
+  /// Dated operation/event lines: `{date, text}`.
+  final List<Map<String, dynamic>> opDetails;
+
+  /// Whether the row came from a table that already has `op_details`; the
+  /// column is only written when it exists or when there is something to save,
+  /// so the app keeps working before the migration is applied.
+  final bool hasOpDetailsColumn;
 
   factory PediatricSurgeryWaitingPatient.fromJson(Map<String, dynamic> json) {
     return PediatricSurgeryWaitingPatient(
@@ -61,6 +71,11 @@ class PediatricSurgeryWaitingPatient {
       createdAt: json['created_at'] == null
           ? null
           : DateTime.tryParse(json['created_at'] as String),
+      opDetails: (json['op_details'] as List<dynamic>? ?? const [])
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .toList(growable: false),
+      hasOpDetailsColumn: json.containsKey('op_details'),
     );
   }
 
@@ -78,6 +93,7 @@ class PediatricSurgeryWaitingPatient {
       'images': images,
       'operation_list_date': operationListDate,
       'call_status': callStatus,
+      if (opDetails.isNotEmpty) 'op_details': opDetails,
     };
   }
 
@@ -95,6 +111,7 @@ class PediatricSurgeryWaitingPatient {
       'images': images,
       'operation_list_date': operationListDate,
       'call_status': callStatus,
+      if (opDetails.isNotEmpty || hasOpDetailsColumn) 'op_details': opDetails,
     };
   }
 }
