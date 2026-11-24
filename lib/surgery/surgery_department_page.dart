@@ -1151,20 +1151,6 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
     final ageKey = GlobalKey();
     final diagnosisKey = GlobalKey();
     final thumbnailFutures = <String, Future<Widget>>{};
-    final diagnosisCounts = <String, int>{};
-    for (final patient in _waitingPatients) {
-      for (final name in _parseDiagnosisParts(patient.diagnosis).$1) {
-        diagnosisCounts[name] = (diagnosisCounts[name] ?? 0) + 1;
-      }
-    }
-    // Most used diagnoses first; computed once so the chips do not reorder.
-    final diagnosisSuggestions =
-        ([..._diagnosisOptions]..sort(
-              (a, b) =>
-                  (diagnosisCounts[b] ?? 0).compareTo(diagnosisCounts[a] ?? 0),
-            ))
-            .take(10)
-            .toList(growable: false);
 
     nameController.text = initialPatient?.name ?? '';
     phoneController.text = initialPatient?.phone ?? '';
@@ -1307,32 +1293,6 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
               });
             }
 
-            void fillAge({
-              String years = '',
-              String months = '',
-              String days = '',
-            }) {
-              setDialogState(() {
-                yearsController.text = years;
-                monthsController.text = months;
-                daysController.text = days;
-                ageError = null;
-              });
-            }
-
-            void toggleDiagnosis(String diagnosis, bool selected) {
-              setDialogState(() {
-                if (selected) {
-                  if (!selectedDiagnoses.contains(diagnosis)) {
-                    selectedDiagnoses.add(diagnosis);
-                  }
-                  diagnosisError = null;
-                } else {
-                  selectedDiagnoses.remove(diagnosis);
-                }
-              });
-            }
-
             void submit() {
               if (isSubmitting) return;
               final formOk = formKey.currentState!.validate();
@@ -1403,51 +1363,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
               ageSummary != null,
               selectedDiagnoses.isNotEmpty,
             ].where((done) => done).length;
-            final chipDiagnoses = [
-              ...diagnosisSuggestions,
-              for (final diagnosis in selectedDiagnoses)
-                if (!diagnosisSuggestions.contains(diagnosis)) diagnosis,
-            ];
             final doctors = _doctorOptions;
-
-            Widget section({
-              required String title,
-              required IconData icon,
-              required List<Widget> children,
-              GlobalKey? sectionKey,
-            }) {
-              return Container(
-                key: sectionKey,
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: const Color(0xFFD9E7EB)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(icon, size: 18, color: teal),
-                        const SizedBox(width: 6),
-                        Text(
-                          title,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFF16324F),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    ...children,
-                  ],
-                ),
-              );
-            }
 
             Widget errorText(String? text) => text == null
                 ? const SizedBox.shrink()
@@ -1667,20 +1583,17 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                       ScrollViewKeyboardDismissBehavior.onDrag,
                   padding: const EdgeInsets.fromLTRB(14, 14, 14, 24),
                   children: [
-                    section(
-                      sectionKey: basicKey,
-                      title: 'بيانات المريض',
-                      icon: Icons.person_outline,
+                    Column(
+                      key: basicKey,
                       children: [
                         TextFormField(
                           controller: nameController,
                           autofocus: !isEditing,
                           textInputAction: TextInputAction.next,
-                          textCapitalization: TextCapitalization.words,
                           onChanged: (_) => setDialogState(() {}),
                           decoration: const InputDecoration(
-                            labelText: 'اسم المريض',
-                            prefixIcon: Icon(Icons.badge_outlined),
+                            labelText: 'name',
+                            prefixIcon: Icon(Icons.person_outline),
                             isDense: true,
                           ),
                           validator: (value) {
@@ -1696,91 +1609,72 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                           textInputAction: TextInputAction.next,
                           keyboardType: TextInputType.phone,
                           decoration: const InputDecoration(
-                            labelText: 'رقم الهاتف',
+                            labelText: 'phone',
                             prefixIcon: Icon(Icons.phone_outlined),
-                            helperText:
-                                '11 رقمًا لكل هاتف، ويمكن إضافة أكثر من رقم',
+                            hintText: '11 رقمًا',
                             isDense: true,
                           ),
                           validator: _validatePhoneNumbers,
                         ),
                       ],
                     ),
-                    section(
-                      sectionKey: ageKey,
-                      title: 'السن',
-                      icon: Icons.cake_outlined,
+                    const SizedBox(height: 10),
+                    Column(
+                      key: ageKey,
                       children: [
                         Row(
                           children: [
-                            ageField(yearsController, 'سنة', 2),
+                            ageField(yearsController, 'yrs', 2),
                             const SizedBox(width: 8),
-                            ageField(monthsController, 'شهر', 2),
+                            ageField(monthsController, 'mth', 2),
                             const SizedBox(width: 8),
-                            ageField(daysController, 'يوم', 3),
+                            ageField(daysController, 'days', 3),
                           ],
                         ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 4,
-                          children: [
-                            ActionChip(
-                              label: const Text('حديث الولادة'),
-                              onPressed: () => fillAge(days: '7'),
-                            ),
-                            ActionChip(
-                              label: const Text('6 شهور'),
-                              onPressed: () => fillAge(months: '6'),
-                            ),
-                            ActionChip(
-                              label: const Text('سنة'),
-                              onPressed: () => fillAge(years: '1'),
-                            ),
-                            ActionChip(
-                              label: const Text('3 سنوات'),
-                              onPressed: () => fillAge(years: '3'),
-                            ),
-                            ActionChip(
-                              label: const Text('5 سنوات'),
-                              onPressed: () => fillAge(years: '5'),
-                            ),
-                          ],
+                        Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: errorText(ageError),
                         ),
-                        if (ageSummary != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Text(
-                              'السن: $ageSummary',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Color(0xFF0F766E),
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        errorText(ageError),
                       ],
                     ),
-                    section(
-                      sectionKey: diagnosisKey,
-                      title: 'التشخيص',
-                      icon: Icons.medical_information_outlined,
+                    const SizedBox(height: 10),
+                    Column(
+                      key: diagnosisKey,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 4,
-                          children: [
-                            for (final diagnosis in chipDiagnoses)
-                              FilterChip(
-                                label: Text(diagnosis),
-                                selected: selectedDiagnoses.contains(diagnosis),
-                                onSelected: (selected) =>
-                                    toggleDiagnosis(diagnosis, selected),
-                              ),
-                          ],
+                        DropdownButtonFormField<String>(
+                          initialValue: null,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'اختر التشخيص',
+                            prefixIcon: Icon(
+                              Icons.medical_information_outlined,
+                            ),
+                            isDense: true,
+                          ),
+                          items: _diagnosisOptions
+                              .map(
+                                (diagnosis) => DropdownMenuItem<String>(
+                                  value: diagnosis,
+                                  child: Text(
+                                    diagnosis,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (value) {
+                            if (value == null) return;
+                            setDialogState(() {
+                              if (!selectedDiagnoses.contains(value)) {
+                                selectedDiagnoses.add(value);
+                              }
+                              diagnosisError = null;
+                            });
+                          },
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 8),
                         LayoutBuilder(
                           builder: (context, constraints) =>
                               RawAutocomplete<String>(
@@ -1825,7 +1719,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                                           addCustomDiagnosis(),
                                       decoration: InputDecoration(
                                         labelText:
-                                            'تشخيص آخر (اكتب للبحث أو للإضافة)',
+                                            'تشخيص جديد (اكتب لعرض الاقتراحات)',
                                         prefixIcon: const Icon(
                                           Icons.edit_note_outlined,
                                         ),
@@ -1868,65 +1762,43 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                                     ),
                               ),
                         ),
-                        errorText(diagnosisError),
-                        const SizedBox(height: 10),
-                        const Text(
-                          'الجانب (اختياري)',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF64748B),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Wrap(
-                          spacing: 6,
-                          children: [
-                            for (final side in _sideOptions)
-                              ChoiceChip(
-                                label: Text(side),
-                                selected: selectedSide == side,
-                                onSelected: (selected) => setDialogState(
-                                  () => selectedSide = selected ? side : null,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    section(
-                      title: 'الطبيب والتاريخ',
-                      icon: Icons.event_note_outlined,
-                      children: [
-                        if (doctors.length <= 6)
+                        if (selectedDiagnoses.isNotEmpty) ...[
+                          const SizedBox(height: 8),
                           Wrap(
                             spacing: 6,
                             runSpacing: 4,
                             children: [
-                              for (final doctor in doctors)
-                                ChoiceChip(
-                                  label: Text(doctor),
-                                  selected: selectedDoctor == doctor,
-                                  onSelected: (_) => setDialogState(
-                                    () => selectedDoctor = doctor,
+                              for (final diagnosis in selectedDiagnoses)
+                                InputChip(
+                                  label: Text(diagnosis),
+                                  visualDensity: VisualDensity.compact,
+                                  onDeleted: () => setDialogState(
+                                    () => selectedDiagnoses.remove(diagnosis),
                                   ),
                                 ),
                             ],
-                          )
-                        else
-                          DropdownButtonFormField<String>(
+                          ),
+                        ],
+                        errorText(diagnosisError),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
                             initialValue: doctors.contains(selectedDoctor)
                                 ? selectedDoctor
                                 : null,
                             isExpanded: true,
                             decoration: const InputDecoration(
-                              labelText: 'الطبيب',
+                              labelText: 'Doctor',
                               prefixIcon: Icon(Icons.person_pin_outlined),
                               isDense: true,
                             ),
                             items: [
                               for (final doctor in doctors)
-                                DropdownMenuItem(
+                                DropdownMenuItem<String>(
                                   value: doctor,
                                   child: Text(
                                     doctor,
@@ -1936,102 +1808,124 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                             ],
                             onChanged: (value) =>
                                 setDialogState(() => selectedDoctor = value),
-                          ),
-                        const SizedBox(height: 10),
-                        TextFormField(
-                          controller: dateController,
-                          readOnly: true,
-                          onTap: canChangeDate ? selectDate : null,
-                          decoration: InputDecoration(
-                            labelText: 'التاريخ',
-                            prefixIcon: const Icon(
-                              Icons.calendar_today_outlined,
-                            ),
-                            suffixIcon: canChangeDate
-                                ? TextButton(
-                                    onPressed: () => setDialogState(() {
-                                      dateController.text = _formatDate(
-                                        DateTime.now(),
-                                      );
-                                    }),
-                                    child: const Text('اليوم'),
-                                  )
-                                : const Icon(Icons.lock_outline),
-                            isDense: true,
-                            helperText: canChangeDate
-                                ? 'اضغط لتغيير التاريخ'
-                                : 'لا يمكن تغيير التاريخ إلا للأدمن',
-                          ),
-                          validator: (value) {
-                            if (value == null || value.trim().isEmpty) {
-                              return 'اختر التاريخ';
-                            }
-                            return null;
-                          },
-                        ),
-                      ],
-                    ),
-                    section(
-                      title: 'ملاحظات',
-                      icon: Icons.note_alt_outlined,
-                      children: [
-                        TextFormField(
-                          controller: notesController,
-                          minLines: 3,
-                          maxLines: 8,
-                          keyboardType: TextInputType.multiline,
-                          textInputAction: TextInputAction.newline,
-                          decoration: const InputDecoration(
-                            hintText: 'اكتب أي ملاحظة مهمة عن حالة المريض',
-                            isDense: true,
+                            validator: (value) => value == null || value.isEmpty
+                                ? 'اختر الطبيب المعالج'
+                                : null,
                           ),
                         ),
-                      ],
-                    ),
-                    section(
-                      title: 'صور المريض',
-                      icon: Icons.photo_library_outlined,
-                      children: [
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (var i = 0; i < patientImages.length; i++)
-                              imageTile(i),
-                            InkWell(
-                              onTap: selectPatientImages,
-                              borderRadius: BorderRadius.circular(12),
-                              child: Container(
-                                width: 96,
-                                height: 96,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: teal),
-                                  color: const Color(0xFFE6F4F1),
-                                ),
-                                child: const Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.add_photo_alternate_outlined,
-                                      color: teal,
-                                    ),
-                                    SizedBox(height: 4),
-                                    Text(
-                                      'إضافة صور',
-                                      style: TextStyle(
-                                        color: teal,
-                                        fontSize: 12,
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            initialValue: selectedSide,
+                            isExpanded: true,
+                            decoration: InputDecoration(
+                              labelText: 'side (اختياري)',
+                              prefixIcon: const Icon(Icons.swap_horiz_rounded),
+                              isDense: true,
+                              suffixIcon: selectedSide == null
+                                  ? null
+                                  : IconButton(
+                                      tooltip: 'مسح الاختيار',
+                                      icon: const Icon(
+                                        Icons.close_rounded,
+                                        size: 18,
+                                      ),
+                                      onPressed: () => setDialogState(
+                                        () => selectedSide = null,
                                       ),
                                     ),
-                                  ],
-                                ),
-                              ),
                             ),
-                          ],
+                            items: [
+                              for (final side in _sideOptions)
+                                DropdownMenuItem<String>(
+                                  value: side,
+                                  child: Text(side),
+                                ),
+                            ],
+                            onChanged: (value) =>
+                                setDialogState(() => selectedSide = value),
+                          ),
                         ),
                       ],
                     ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: dateController,
+                      readOnly: true,
+                      onTap: canChangeDate ? selectDate : null,
+                      decoration: InputDecoration(
+                        labelText: 'Date',
+                        prefixIcon: const Icon(Icons.calendar_today_outlined),
+                        suffixIcon: canChangeDate
+                            ? TextButton(
+                                onPressed: () => setDialogState(() {
+                                  dateController.text = _formatDate(
+                                    DateTime.now(),
+                                  );
+                                }),
+                                child: const Text('اليوم'),
+                              )
+                            : const Icon(Icons.lock_outline),
+                        isDense: true,
+                        helperText: canChangeDate
+                            ? null
+                            : 'لا يمكن تغيير التاريخ إلا للأدمن',
+                      ),
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'اختر التاريخ';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: notesController,
+                      minLines: 2,
+                      maxLines: 6,
+                      keyboardType: TextInputType.multiline,
+                      textInputAction: TextInputAction.newline,
+                      decoration: const InputDecoration(
+                        labelText: 'ملاحظات هامة (اختياري)',
+                        prefixIcon: Icon(Icons.note_alt_outlined),
+                        isDense: true,
+                        alignLabelWithHint: true,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'صور المريض',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF64748B),
+                            ),
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: selectPatientImages,
+                          icon: const Icon(Icons.add_photo_alternate_outlined),
+                          label: const Text('إضافة صور'),
+                        ),
+                      ],
+                    ),
+                    if (patientImages.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (var i = 0; i < patientImages.length; i++)
+                            imageTile(i),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
