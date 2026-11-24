@@ -268,11 +268,18 @@ class PediatricSurgeryDoctorsPage extends StatefulWidget {
     super.key,
     this.waitingRepository,
     this.doctorsRepository,
+    this.title = 'جراحة الأطفال',
+    this.customList = false,
   });
 
   /// Guest mode passes in-memory repositories, so nothing is saved.
   final PediatricSurgeryWaitingRepository? waitingRepository;
   final PediatricSurgeryDoctorsRepository? doctorsRepository;
+
+  final String title;
+
+  /// An admin-created list: its doctors are managed by admins only.
+  final bool customList;
 
   bool get isDemo => waitingRepository is DemoPediatricSurgeryWaitingRepository;
 
@@ -288,8 +295,8 @@ class _PediatricSurgeryDoctorsPageState
   late final PediatricSurgeryDoctorsRepository _doctorsRepository =
       widget.doctorsRepository ?? PediatricSurgeryDoctorsRepository();
   List<PediatricSurgeryWaitingPatient> _patients = const [];
-  late List<_PediatricDoctor> _doctors = widget.isDemo
-      ? const []
+  late List<_PediatricDoctor> _doctors = widget.isDemo || widget.customList
+      ? []
       : [..._defaultPediatricSurgeryDoctors];
 
   bool get _isAdmin => widget.isDemo || isCurrentUserAdmin();
@@ -340,7 +347,11 @@ class _PediatricSurgeryDoctorsPageState
       MaterialPageRoute(
         builder: (_) => PediatricSurgeryPage(
           doctor: doctor,
-          waitingRepository: widget.isDemo ? _repository : null,
+          waitingRepository: widget.isDemo || widget.customList
+              ? _repository
+              : null,
+          title: widget.title,
+          customList: widget.customList,
           doctorOptions: _doctors.map((d) => d.name).toList(growable: false),
         ),
       ),
@@ -466,7 +477,7 @@ class _PediatricSurgeryDoctorsPageState
       child: Scaffold(
         backgroundColor: const Color(0xFFF5F7FB),
         appBar: AppBar(
-          title: const Text('جراحة الأطفال'),
+          title: Text(widget.title),
           actions: const [AccountButton()],
         ),
         body: SafeArea(
@@ -474,10 +485,11 @@ class _PediatricSurgeryDoctorsPageState
             padding: const EdgeInsets.all(12),
             children: [
               _PediatricHeaderCard(
+                title: widget.title,
                 waitingCount: _countForStage('waiting'),
                 followUpCount: _countForStage('follow_up'),
                 admissionCount: _countForStage('admission'),
-                showDoctorName: !widget.isDemo,
+                showDoctorName: !widget.isDemo && !widget.customList,
               ),
               const SizedBox(height: 12),
               if (widget.isDemo) ...[
@@ -494,21 +506,38 @@ class _PediatricSurgeryDoctorsPageState
                 ),
                 const SizedBox(height: 12),
               ],
-              FilledButton.icon(
-                onPressed: _addDoctor,
-                icon: const Icon(Icons.person_add_alt_1_rounded),
-                label: const Text('إضافة طبيب جديد وإدارة قائمته'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF16324F),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+              if (!widget.customList || _isAdmin)
+                FilledButton.icon(
+                  onPressed: _addDoctor,
+                  icon: const Icon(Icons.person_add_alt_1_rounded),
+                  label: Text(
+                    widget.customList
+                        ? 'إضافة طبيب للقائمة'
+                        : 'إضافة طبيب جديد وإدارة قائمته',
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF16324F),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                   ),
                 ),
-              ),
+              if (widget.customList && _doctors.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text(
+                    'لا يوجد أطباء في هذه القائمة بعد.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Color(0xFF64748B)),
+                  ),
+                ),
               const SizedBox(height: 16),
               for (final doctor in _doctors) ...[
                 _ModernDoctorCard(
+                  badge: widget.customList
+                      ? widget.title
+                      : 'استشاري جراحة أطفال',
                   name: doctor.name,
                   colors: doctor.colors,
                   accent: doctor.accent,
@@ -535,7 +564,14 @@ class PediatricSurgeryPage extends StatefulWidget {
     this.doctor,
     this.doctorOptions = const [],
     this.waitingRepository,
+    this.title = 'جراحة الأطفال',
+    this.customList = false,
   });
+
+  final String title;
+
+  /// An admin-created list: the built-in pediatric doctors do not apply.
+  final bool customList;
 
   /// Guest mode passes an in-memory repository, so nothing is saved.
   final PediatricSurgeryWaitingRepository? waitingRepository;
@@ -576,7 +612,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
   ];
 
   List<String> get _doctorOptions => {
-    if (!widget.isDemo) ..._builtInDoctorOptions,
+    if (!widget.isDemo && !widget.customList) ..._builtInDoctorOptions,
     ...widget.doctorOptions,
   }.toList(growable: false);
 
@@ -6815,12 +6851,14 @@ class _DepartmentCard extends StatelessWidget {
 
 class _PediatricHeaderCard extends StatelessWidget {
   const _PediatricHeaderCard({
+    this.title = 'جراحة الأطفال',
     required this.waitingCount,
     required this.followUpCount,
     required this.admissionCount,
     this.showDoctorName = true,
   });
 
+  final String title;
   final int waitingCount;
   final int followUpCount;
   final int admissionCount;
@@ -6869,8 +6907,8 @@ class _PediatricHeaderCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'جراحة الأطفال',
-                      style: TextStyle(
+                      title,
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 22,
                         fontWeight: FontWeight.w800,
@@ -7015,6 +7053,7 @@ class _EcgPainter extends CustomPainter {
 
 class _ModernDoctorCard extends StatefulWidget {
   const _ModernDoctorCard({
+    this.badge = 'استشاري جراحة أطفال',
     required this.name,
     required this.colors,
     required this.accent,
@@ -7026,6 +7065,7 @@ class _ModernDoctorCard extends StatefulWidget {
     this.onDelete,
   });
 
+  final String badge;
   final String name;
   final List<Color> colors;
   final Color accent;
@@ -7280,8 +7320,10 @@ class _ModernDoctorCardState extends State<_ModernDoctorCard> {
                                         ),
                                       ),
                                     ),
-                                    child: const Text(
-                                      'استشاري جراحة أطفال',
+                                    child: Text(
+                                      widget.badge,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
                                         color: Color(0xFFE2E8F0),
                                         fontSize: 11,

@@ -33,6 +33,12 @@ enum HospService {
     'عيادة الأطفال',
     'Pediatrics Clinic',
     Icons.child_care_rounded,
+  ),
+  otherWaitingLists(
+    'other_waiting_lists',
+    'قوائم انتظار الأقسام الأخرى',
+    'Other Departments Waiting Lists',
+    Icons.format_list_numbered_rounded,
   );
 
   const HospService(this.key, this.arabicName, this.englishName, this.icon);

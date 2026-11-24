@@ -5,6 +5,8 @@ import 'package:hospmaster/auth/service_access.dart';
 import 'package:hospmaster/clinic/obgyn_patient_form_page.dart';
 import 'package:hospmaster/clinic/pediatric_patient_form_page.dart';
 import 'package:hospmaster/parameters/medical_formulas_page.dart';
+import 'package:hospmaster/surgery/admin_access.dart';
+import 'package:hospmaster/surgery/custom_waiting_lists_section.dart';
 import 'package:hospmaster/surgery/oncology_surgery_page.dart';
 import 'package:hospmaster/surgery/patient_follow_up_sheet_page.dart';
 import 'package:hospmaster/surgery/patient_repository.dart';
@@ -145,8 +147,9 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
   bool _can(HospService service) => widget.services?.contains(service) ?? true;
   bool get _canSurgeryDepartments =>
       _can(HospService.generalSurgery) || _can(HospService.oncologySurgery);
-  bool get _canHospital =>
-      _canSurgeryDepartments || _can(HospService.pediatricSurgery);
+  bool get _canWaitingLists =>
+      _can(HospService.pediatricSurgery) || _can(HospService.otherWaitingLists);
+  bool get _canHospital => _canSurgeryDepartments || _canWaitingLists;
   bool get _canClinics =>
       _can(HospService.obgynClinic) || _can(HospService.pediatricsClinic);
   int get _waiting =>
@@ -903,7 +906,7 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
                   onTap: () => setState(() => _tab = AppTab.departments),
                 ),
               ),
-            if (_can(HospService.pediatricSurgery))
+            if (_canWaitingLists)
               SizedBox(
                 width: wide ? 310 : double.infinity,
                 child: _managerCard(
@@ -1037,33 +1040,46 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
         const SizedBox(height: 14),
         Wrap(
           children: [
-            SizedBox(
-              width: wide ? 310 : double.infinity,
-              child: _managerCard(
-                title: 'Pediatric Surgery',
-                arabicTitle: 'جراحة الأطفال',
-                arabicDescription: 'قائمة انتظار جراحة الأطفال حسب الطبيب',
-                description: 'Pediatric surgery waiting list by doctor',
-                icon: Icons.child_care_outlined,
-                colors: const [Color(0xFFF59E0B), Color(0xFFEF4444)],
-                onTap: () => _openSurgeryPage(
-                  (_) => PediatricSurgeryDoctorsPage(
-                    waitingRepository: widget.isGuest
-                        ? _demoWaitingRepository
-                        : null,
-                    doctorsRepository: widget.isGuest
-                        ? _demoDoctorsRepository
-                        : null,
+            if (_can(HospService.pediatricSurgery))
+              SizedBox(
+                width: wide ? 310 : double.infinity,
+                child: _managerCard(
+                  title: 'Pediatric Surgery',
+                  arabicTitle: 'جراحة الأطفال',
+                  arabicDescription: 'قائمة انتظار جراحة الأطفال حسب الطبيب',
+                  description: 'Pediatric surgery waiting list by doctor',
+                  icon: Icons.child_care_outlined,
+                  colors: const [Color(0xFFF59E0B), Color(0xFFEF4444)],
+                  onTap: () => _openSurgeryPage(
+                    (_) => PediatricSurgeryDoctorsPage(
+                      waitingRepository: widget.isGuest
+                          ? _demoWaitingRepository
+                          : null,
+                      doctorsRepository: widget.isGuest
+                          ? _demoDoctorsRepository
+                          : null,
+                    ),
                   ),
                 ),
               ),
-            ),
           ],
         ),
+        if (_can(HospService.otherWaitingLists) &&
+            (widget.isGuest || SurgerySupabaseConfig.isConfigured))
+          CustomWaitingListsSection(
+            repository: widget.isGuest
+                ? _demoListsRepository
+                : _listsRepository,
+            canManage: widget.isGuest || isCurrentUserAdmin(),
+            cardBuilder: _managerCard,
+            wide: wide,
+          ),
       ],
     );
   }
 
+  final _listsRepository = WaitingListsRepository();
+  final _demoListsRepository = DemoWaitingListsRepository();
   final _demoSurgeryRepository = DemoSurgeryPatientRepository();
   final _demoWaitingRepository = DemoPediatricSurgeryWaitingRepository();
   final _demoDoctorsRepository = DemoPediatricSurgeryDoctorsRepository();
