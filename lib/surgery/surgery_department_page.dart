@@ -105,6 +105,21 @@ const List<_PediatricDoctor> _defaultPediatricSurgeryDoctors = [
   ),
 ];
 
+const List<List<Color>> _extraDoctorPalette = [
+  [Color(0xFF075985), Color(0xFF06B6D4)],
+  [Color(0xFF166534), Color(0xFF22C55E)],
+  [Color(0xFF9A3412), Color(0xFFF97316)],
+  [Color(0xFF374151), Color(0xFF6366F1)],
+];
+
+_PediatricDoctor _pediatricDoctorFor(String name, int index) {
+  for (final doctor in _defaultPediatricSurgeryDoctors) {
+    if (doctor.name == name) return doctor;
+  }
+  final colors = _extraDoctorPalette[index % _extraDoctorPalette.length];
+  return _PediatricDoctor(name: name, colors: colors, accent: colors.last);
+}
+
 class _AddDoctorDialog extends StatefulWidget {
   const _AddDoctorDialog();
 
@@ -186,6 +201,69 @@ class _AddDoctorDialogState extends State<_AddDoctorDialog> {
   }
 }
 
+class _RenameDoctorDialog extends StatefulWidget {
+  const _RenameDoctorDialog({required this.initialName});
+
+  final String initialName;
+
+  @override
+  State<_RenameDoctorDialog> createState() => _RenameDoctorDialogState();
+}
+
+class _RenameDoctorDialogState extends State<_RenameDoctorDialog> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initialName,
+  );
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final name = _controller.text.trim();
+    if (name.isEmpty) {
+      setState(() => _error = 'يرجى إدخال اسم الطبيب');
+      return;
+    }
+    Navigator.pop(context, name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        title: const Text('تعديل بطاقة الطبيب'),
+        content: TextField(
+          controller: _controller,
+          autofocus: true,
+          textInputAction: TextInputAction.done,
+          decoration: InputDecoration(
+            labelText: 'اسم الطبيب',
+            prefixIcon: const Icon(Icons.person_outline),
+            border: const OutlineInputBorder(),
+            errorText: _error,
+          ),
+          onChanged: (_) {
+            if (_error != null) setState(() => _error = null);
+          },
+          onSubmitted: (_) => _submit(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(onPressed: _submit, child: const Text('حفظ')),
+        ],
+      ),
+    );
+  }
+}
+
 class PediatricSurgeryDoctorsPage extends StatefulWidget {
   const PediatricSurgeryDoctorsPage({super.key});
 
@@ -198,13 +276,33 @@ class _PediatricSurgeryDoctorsPageState
     extends State<PediatricSurgeryDoctorsPage> {
   final PediatricSurgeryWaitingRepository _repository =
       PediatricSurgeryWaitingRepository();
+  final PediatricSurgeryDoctorsRepository _doctorsRepository =
+      PediatricSurgeryDoctorsRepository();
   List<PediatricSurgeryWaitingPatient> _patients = const [];
-  final List<_PediatricDoctor> _doctors = [..._defaultPediatricSurgeryDoctors];
+  List<_PediatricDoctor> _doctors = [..._defaultPediatricSurgeryDoctors];
+
+  bool get _isAdmin => isAdminUser(Supabase.instance.client.auth.currentUser);
 
   @override
   void initState() {
     super.initState();
+    _loadDoctors();
     _loadPatients();
+  }
+
+  Future<void> _loadDoctors() async {
+    try {
+      final names = await _doctorsRepository.fetchDoctorNames();
+      if (!mounted) return;
+      setState(() {
+        _doctors = [
+          for (var i = 0; i < names.length; i++)
+            _pediatricDoctorFor(names[i], i),
+        ];
+      });
+    } catch (_) {
+      // The default doctors stay visible when the list cannot be loaded.
+    }
   }
 
   Future<void> _loadPatients() async {
@@ -228,10 +326,25 @@ class _PediatricSurgeryDoctorsPageState
 
   Future<void> _openDoctor(String doctor) async {
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => PediatricSurgeryPage(doctor: doctor)),
+      MaterialPageRoute(
+        builder: (_) => PediatricSurgeryPage(
+          doctor: doctor,
+          doctorOptions: _doctors.map((d) => d.name).toList(growable: false),
+        ),
+      ),
     );
     if (mounted) _loadPatients();
   }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  bool _doctorExists(String name) =>
+      _doctors.any((doctor) => doctor.name.toLowerCase() == name.toLowerCase());
 
   Future<void> _addDoctor() async {
     final normalized = await showDialog<String>(
@@ -239,26 +352,105 @@ class _PediatricSurgeryDoctorsPageState
       builder: (_) => const _AddDoctorDialog(),
     );
     if (normalized == null || normalized.isEmpty) return;
-    if (_doctors.any((doctor) => doctor.name == normalized)) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('هذا الطبيب مضاف بالفعل')));
+    if (_doctorExists(normalized)) {
+      _showMessage('هذا الطبيب مضاف بالفعل');
       return;
     }
 
-    final palette = <List<Color>>[
-      [const Color(0xFF075985), const Color(0xFF06B6D4)],
-      [const Color(0xFF166534), const Color(0xFF22C55E)],
-      [const Color(0xFF9A3412), const Color(0xFFF97316)],
-      [const Color(0xFF374151), const Color(0xFF6366F1)],
-    ];
-    final colors = palette[_doctors.length % palette.length];
-    setState(() {
-      _doctors.add(
-        _PediatricDoctor(name: normalized, colors: colors, accent: colors.last),
+    try {
+      await _doctorsRepository.addDoctor(normalized);
+    } catch (_) {
+      _showMessage('تعذر حفظ الطبيب. تأكد من تطبيق تحديث قاعدة البيانات.');
+      return;
+    }
+    await _loadDoctors();
+  }
+
+  Future<void> _editDoctor(_PediatricDoctor doctor) async {
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (_) => _RenameDoctorDialog(initialName: doctor.name),
+    );
+    if (newName == null || newName == doctor.name) return;
+    if (_doctorExists(newName) &&
+        newName.toLowerCase() != doctor.name.toLowerCase()) {
+      _showMessage('هذا الطبيب مضاف بالفعل');
+      return;
+    }
+
+    try {
+      await _doctorsRepository.renameDoctor(doctor.name, newName);
+      await _repository.setDoctorForPatients(
+        _patientIdsForDoctor(doctor.name),
+        newName,
       );
-    });
+    } catch (_) {
+      _showMessage('تعذر تعديل بطاقة الطبيب. هذه الصلاحية للأدمن فقط.');
+    }
+    await _loadDoctors();
+    await _loadPatients();
+  }
+
+  List<String> _patientIdsForDoctor(String doctor) => [
+    for (final patient in _patients)
+      if (patient.doctor == doctor && patient.id != null) patient.id!,
+  ];
+
+  Future<void> _deleteDoctor(_PediatricDoctor doctor) async {
+    final doctorPatients = _patients
+        .where((patient) => patient.doctor == doctor.name)
+        .toList(growable: false);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('حذف قائمة الطبيب'),
+          content: Text(
+            doctorPatients.isEmpty
+                ? 'هل تريد حذف قائمة ${doctor.name}؟'
+                : 'سيتم حذف قائمة ${doctor.name} مع ${doctorPatients.length} '
+                      'مريض وصورهم نهائياً. هل تريد المتابعة؟',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('حذف'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await _doctorsRepository.deleteDoctor(doctor.name);
+      final imagePaths = [
+        for (final patient in doctorPatients)
+          for (final image in patient.images)
+            if (image['path'] is String) image['path'] as String,
+      ];
+      if (imagePaths.isNotEmpty) {
+        try {
+          await Supabase.instance.client.storage
+              .from('pediatric_surgery_patient_images')
+              .remove(imagePaths);
+        } catch (_) {}
+      }
+      await _repository.deletePatients([
+        for (final patient in doctorPatients)
+          if (patient.id != null) patient.id!,
+      ]);
+    } catch (_) {
+      _showMessage('تعذر حذف القائمة. هذه الصلاحية للأدمن فقط.');
+    }
+    await _loadDoctors();
+    await _loadPatients();
   }
 
   @override
@@ -303,6 +495,8 @@ class _PediatricSurgeryDoctorsPageState
                   followUpCount: _countForDoctor(doctor.name, 'follow_up'),
                   admissionCount: _countForDoctor(doctor.name, 'admission'),
                   onTap: () => _openDoctor(doctor.name),
+                  onEdit: _isAdmin ? () => _editDoctor(doctor) : null,
+                  onDelete: _isAdmin ? () => _deleteDoctor(doctor) : null,
                 ),
                 const SizedBox(height: 12),
               ],
@@ -315,10 +509,17 @@ class _PediatricSurgeryDoctorsPageState
 }
 
 class PediatricSurgeryPage extends StatefulWidget {
-  const PediatricSurgeryPage({super.key, this.doctor});
+  const PediatricSurgeryPage({
+    super.key,
+    this.doctor,
+    this.doctorOptions = const [],
+  });
 
   /// When set, the page only shows and creates patients for this doctor.
   final String? doctor;
+
+  /// Doctors created from the doctors page, in addition to the built-in ones.
+  final List<String> doctorOptions;
 
   @override
   State<PediatricSurgeryPage> createState() => _PediatricSurgeryPageState();
@@ -342,11 +543,16 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
     'خصية معلقة',
   ];
   static const List<String> _sideOptions = ['ج.أيمن', 'ج.أيسر', 'الجانبان'];
-  static const List<String> _doctorOptions = [
+  static const List<String> _builtInDoctorOptions = [
     'د. أحمد أبو الحسب',
     'د. حمدي السيد',
     'د. عبد الرحمن جمعة',
   ];
+
+  List<String> get _doctorOptions => {
+    ..._builtInDoctorOptions,
+    ...widget.doctorOptions,
+  }.toList(growable: false);
 
   late final TabController _tabController;
   final PediatricSurgeryWaitingRepository _waitingRepository =
@@ -6184,6 +6390,8 @@ class _ModernDoctorCard extends StatefulWidget {
     required this.followUpCount,
     required this.admissionCount,
     required this.onTap,
+    this.onEdit,
+    this.onDelete,
   });
 
   final String name;
@@ -6193,6 +6401,8 @@ class _ModernDoctorCard extends StatefulWidget {
   final int followUpCount;
   final int admissionCount;
   final VoidCallback onTap;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   @override
   State<_ModernDoctorCard> createState() => _ModernDoctorCardState();
@@ -6545,6 +6755,34 @@ class _ModernDoctorCardState extends State<_ModernDoctorCard> {
                       ],
                     ),
                   ),
+                  if (widget.onEdit != null || widget.onDelete != null)
+                    PositionedDirectional(
+                      top: 4,
+                      end: 4,
+                      child: PopupMenuButton<String>(
+                        tooltip: 'إدارة القائمة',
+                        icon: const Icon(
+                          Icons.more_vert_rounded,
+                          color: Colors.white,
+                        ),
+                        onSelected: (value) {
+                          if (value == 'edit') widget.onEdit?.call();
+                          if (value == 'delete') widget.onDelete?.call();
+                        },
+                        itemBuilder: (_) => [
+                          if (widget.onEdit != null)
+                            const PopupMenuItem(
+                              value: 'edit',
+                              child: Text('تعديل البطاقة'),
+                            ),
+                          if (widget.onDelete != null)
+                            const PopupMenuItem(
+                              value: 'delete',
+                              child: Text('حذف القائمة'),
+                            ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),

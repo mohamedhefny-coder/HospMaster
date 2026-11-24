@@ -167,4 +167,75 @@ class PediatricSurgeryWaitingRepository {
         .eq('id', id)
         .timeout(_requestTimeout);
   }
+
+  Future<void> deletePatients(List<String> ids) {
+    if (ids.isEmpty) return Future.value();
+    return _client
+        .from(_tableName)
+        .delete()
+        .inFilter('id', ids)
+        .timeout(_requestTimeout);
+  }
+
+  Future<void> setDoctorForPatients(List<String> ids, String doctor) {
+    if (ids.isEmpty) return Future.value();
+    return _client
+        .from(_tableName)
+        .update({'doctor': doctor})
+        .inFilter('id', ids)
+        .timeout(_requestTimeout);
+  }
+}
+
+class PediatricSurgeryDoctorsRepository {
+  PediatricSurgeryDoctorsRepository({SupabaseClient? client})
+    : _client = client ?? Supabase.instance.client;
+
+  final SupabaseClient _client;
+
+  static const String _tableName = 'pediatric_surgery_doctors';
+  static const Duration _requestTimeout = Duration(seconds: 45);
+
+  Future<List<String>> fetchDoctorNames() async {
+    final response = await _client
+        .from(_tableName)
+        .select('name')
+        .order('created_at', ascending: true)
+        .timeout(_requestTimeout);
+    return (response as List<dynamic>)
+        .map((row) => (row as Map)['name'] as String)
+        .toList(growable: false);
+  }
+
+  Future<void> addDoctor(String name) {
+    return _client
+        .from(_tableName)
+        .insert({'name': name})
+        .timeout(_requestTimeout);
+  }
+
+  /// Throws when nothing was updated, e.g. because the user is not an admin.
+  Future<void> renameDoctor(String oldName, String newName) async {
+    final updated = await _client
+        .from(_tableName)
+        .update({'name': newName})
+        .eq('name', oldName)
+        .select('id')
+        .timeout(_requestTimeout);
+    if ((updated as List).isEmpty) {
+      throw StateError('Doctor was not updated.');
+    }
+  }
+
+  Future<void> deleteDoctor(String name) async {
+    final deleted = await _client
+        .from(_tableName)
+        .delete()
+        .eq('name', name)
+        .select('id')
+        .timeout(_requestTimeout);
+    if ((deleted as List).isEmpty) {
+      throw StateError('Doctor was not deleted.');
+    }
+  }
 }
