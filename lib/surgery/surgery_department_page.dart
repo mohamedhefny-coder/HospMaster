@@ -265,7 +265,10 @@ class _RenameDoctorDialogState extends State<_RenameDoctorDialog> {
 }
 
 class PediatricSurgeryDoctorsPage extends StatefulWidget {
-  const PediatricSurgeryDoctorsPage({super.key});
+  const PediatricSurgeryDoctorsPage({super.key, this.guestPreview = false});
+
+  /// Read-only empty template for guests: no doctor names and no data.
+  final bool guestPreview;
 
   @override
   State<PediatricSurgeryDoctorsPage> createState() =>
@@ -274,18 +277,31 @@ class PediatricSurgeryDoctorsPage extends StatefulWidget {
 
 class _PediatricSurgeryDoctorsPageState
     extends State<PediatricSurgeryDoctorsPage> {
-  final PediatricSurgeryWaitingRepository _repository =
+  late final PediatricSurgeryWaitingRepository _repository =
       PediatricSurgeryWaitingRepository();
-  final PediatricSurgeryDoctorsRepository _doctorsRepository =
+  late final PediatricSurgeryDoctorsRepository _doctorsRepository =
       PediatricSurgeryDoctorsRepository();
   List<PediatricSurgeryWaitingPatient> _patients = const [];
   List<_PediatricDoctor> _doctors = [..._defaultPediatricSurgeryDoctors];
 
-  bool get _isAdmin => isAdminUser(Supabase.instance.client.auth.currentUser);
+  bool get _isAdmin =>
+      !widget.guestPreview &&
+      isAdminUser(Supabase.instance.client.auth.currentUser);
 
   @override
   void initState() {
     super.initState();
+    if (widget.guestPreview) {
+      _doctors = [
+        for (var i = 0; i < 2; i++)
+          _PediatricDoctor(
+            name: 'قائمة الطبيب ${i + 1}',
+            colors: _defaultPediatricSurgeryDoctors[i].colors,
+            accent: _defaultPediatricSurgeryDoctors[i].accent,
+          ),
+      ];
+      return;
+    }
     _loadDoctors();
     _loadPatients();
   }
@@ -329,7 +345,10 @@ class _PediatricSurgeryDoctorsPageState
       MaterialPageRoute(
         builder: (_) => PediatricSurgeryPage(
           doctor: doctor,
-          doctorOptions: _doctors.map((d) => d.name).toList(growable: false),
+          guestPreview: widget.guestPreview,
+          doctorOptions: widget.guestPreview
+              ? const []
+              : _doctors.map((d) => d.name).toList(growable: false),
         ),
       ),
     );
@@ -471,20 +490,34 @@ class _PediatricSurgeryDoctorsPageState
                 waitingCount: _countForStage('waiting'),
                 followUpCount: _countForStage('follow_up'),
                 admissionCount: _countForStage('admission'),
+                showDoctorName: !widget.guestPreview,
               ),
               const SizedBox(height: 12),
-              FilledButton.icon(
-                onPressed: _addDoctor,
-                icon: const Icon(Icons.person_add_alt_1_rounded),
-                label: const Text('إضافة طبيب جديد وإدارة قائمته'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF16324F),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
+              if (widget.guestPreview)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF7E0),
                     borderRadius: BorderRadius.circular(16),
                   ),
+                  child: const Text(
+                    'نموذج فارغ للاطلاع فقط. سجّل الدخول كمشترك لاستخدام قوائم الانتظار.',
+                    textAlign: TextAlign.center,
+                  ),
+                )
+              else
+                FilledButton.icon(
+                  onPressed: _addDoctor,
+                  icon: const Icon(Icons.person_add_alt_1_rounded),
+                  label: const Text('إضافة طبيب جديد وإدارة قائمته'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF16324F),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
                 ),
-              ),
               const SizedBox(height: 16),
               for (final doctor in _doctors) ...[
                 _ModernDoctorCard(
@@ -513,7 +546,11 @@ class PediatricSurgeryPage extends StatefulWidget {
     super.key,
     this.doctor,
     this.doctorOptions = const [],
+    this.guestPreview = false,
   });
+
+  /// Empty, read-only template shown to guests (no data is loaded).
+  final bool guestPreview;
 
   /// When set, the page only shows and creates patients for this doctor.
   final String? doctor;
@@ -555,7 +592,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
   }.toList(growable: false);
 
   late final TabController _tabController;
-  final PediatricSurgeryWaitingRepository _waitingRepository =
+  late final PediatricSurgeryWaitingRepository _waitingRepository =
       PediatricSurgeryWaitingRepository();
   int _currentTabIndex = 0;
   List<_WaitingPatient> _waitingPatients = const [];
@@ -644,10 +681,11 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
   };
 
   bool get _canAddPatientFromCurrentTab =>
-      _currentTabIndex == 0 ||
-      _currentTabIndex == 5 ||
-      _currentTabIndex == 6 ||
-      _currentTabIndex == 7;
+      !widget.guestPreview &&
+      (_currentTabIndex == 0 ||
+          _currentTabIndex == 5 ||
+          _currentTabIndex == 6 ||
+          _currentTabIndex == 7);
 
   List<Color> _tabGradientForIndex(int index) => switch (index) {
     0 => const [Color(0xFFD8F5E8), Color(0xFFB5E8D1)],
@@ -686,7 +724,11 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
   @override
   void initState() {
     super.initState();
-    _loadWaitingPatients();
+    if (widget.guestPreview) {
+      _isLoadingPatients = false;
+    } else {
+      _loadWaitingPatients();
+    }
     _tabController = TabController(length: 8, vsync: this)
       ..addListener(() {
         if (_tabController.indexIsChanging) return;
@@ -2701,12 +2743,19 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
             children: [
               NestedScrollView(
                 headerSliverBuilder: (context, innerBoxIsScrolled) => [
-                  const SliverToBoxAdapter(
-                    child: Align(
-                      alignment: AlignmentDirectional.centerEnd,
-                      child: Padding(
-                        padding: EdgeInsets.fromLTRB(8, 4, 8, 0),
-                        child: AccountButton(),
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            tooltip: 'رجوع',
+                            onPressed: () => Navigator.of(context).maybePop(),
+                            icon: const Icon(Icons.arrow_back),
+                          ),
+                          const Spacer(),
+                          const AccountButton(),
+                        ],
                       ),
                     ),
                   ),
@@ -2720,7 +2769,9 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                           if (_currentTabIndex == 0)
                             Expanded(
                               child: OutlinedButton.icon(
-                                onPressed: _showPatientSearchDialog,
+                                onPressed: widget.guestPreview
+                                    ? null
+                                    : _showPatientSearchDialog,
                                 icon: const Icon(Icons.search_rounded),
                                 label: Text(
                                   _searchQuery.isNotEmpty
@@ -2750,7 +2801,8 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                             )
                           else
                             const Spacer(),
-                          if (_currentTabIndex <= 3) ...[
+                          if (_currentTabIndex <= 3 &&
+                              !widget.guestPreview) ...[
                             const SizedBox(width: 8),
                             IconButton.filledTonal(
                               tooltip: 'تصدير بيانات مرضى التبويب إلى Excel',
@@ -2901,7 +2953,9 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                           _setTabScrollPosition(0, position),
                       title: 'قائمة الانتظار',
                       emptyTitle: 'لا توجد حالات في قائمة الانتظار',
-                      emptyDescription: 'استخدم زر الإضافة لإدخال أول مريض.',
+                      emptyDescription: widget.guestPreview
+                          ? 'نموذج فارغ للاطلاع فقط.'
+                          : 'استخدم زر الإضافة لإدخال أول مريض.',
                       emptyIcon: Icons.inbox_outlined,
                       patients: _waitingStagePatients,
                       isLoading: _isLoadingPatients,
@@ -6195,11 +6249,13 @@ class _PediatricHeaderCard extends StatelessWidget {
     required this.waitingCount,
     required this.followUpCount,
     required this.admissionCount,
+    this.showDoctorName = true,
   });
 
   final int waitingCount;
   final int followUpCount;
   final int admissionCount;
+  final bool showDoctorName;
 
   @override
   Widget build(BuildContext context) {
@@ -6253,60 +6309,67 @@ class _PediatricHeaderCard extends StatelessWidget {
                     ),
                     SizedBox(height: 4),
                     Text(
-                      'تنظيم قائمة الانتظار والمتابعة والحجز تحت إشراف',
-                      style: TextStyle(color: Color(0xFFFFF7ED), fontSize: 14),
-                    ),
-                    SizedBox(height: 9),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 7,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.22),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.72),
-                            width: 1.2,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.white.withValues(alpha: 0.26),
-                              blurRadius: 14,
-                              spreadRadius: 1,
-                            ),
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.12),
-                              blurRadius: 7,
-                              offset: Offset(0, 3),
-                            ),
-                          ],
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const _HealthInsuranceShieldLogo(),
-                            SizedBox(width: 7),
-                            Text(
-                              'الدكتور أحمد بك أبو الحسب',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w800,
-                                shadows: [
-                                  Shadow(
-                                    color: Color(0x66000000),
-                                    blurRadius: 4,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
+                      showDoctorName
+                          ? 'تنظيم قائمة الانتظار والمتابعة والحجز تحت إشراف'
+                          : 'تنظيم قائمة الانتظار والمتابعة والحجز',
+                      style: const TextStyle(
+                        color: Color(0xFFFFF7ED),
+                        fontSize: 14,
                       ),
                     ),
+                    if (showDoctorName) ...[
+                      SizedBox(height: 9),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Container(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 7,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.22),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.72),
+                              width: 1.2,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.white.withValues(alpha: 0.26),
+                                blurRadius: 14,
+                                spreadRadius: 1,
+                              ),
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.12),
+                                blurRadius: 7,
+                                offset: Offset(0, 3),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const _HealthInsuranceShieldLogo(),
+                              SizedBox(width: 7),
+                              Text(
+                                'الدكتور أحمد بك أبو الحسب',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                  shadows: [
+                                    Shadow(
+                                      color: Color(0x66000000),
+                                      blurRadius: 4,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

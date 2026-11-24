@@ -242,25 +242,31 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
   Widget build(BuildContext context) {
     return Directionality(
       textDirection: _direction,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final wide = constraints.maxWidth >= 900;
-          return Scaffold(
-            body: Row(
-              children: [
-                if (wide) _sidebar(),
-                Expanded(
-                  child: Column(
-                    children: [
-                      _header(wide),
-                      Expanded(child: _body(wide)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          );
+      child: PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _goBack();
         },
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= 900;
+            return Scaffold(
+              body: Row(
+                children: [
+                  if (wide) _sidebar(),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        _header(wide),
+                        Expanded(child: _body(wide)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -459,7 +465,29 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
     );
   }
 
+  void _goBack() {
+    if (_tab == AppTab.overview) {
+      _backToModes();
+      return;
+    }
+    setState(() {
+      if (_tab == AppTab.clinicManager && _openClinic != null) {
+        _openClinic = null;
+      } else {
+        _tab = switch (_tab) {
+          AppTab.departments || AppTab.waitingLists => AppTab.hospitalManager,
+          _ => AppTab.overview,
+        };
+      }
+    });
+  }
+
   Widget _header(bool wide) {
+    final back = IconButton(
+      tooltip: tr('رجوع', 'Back'),
+      onPressed: _goBack,
+      icon: const Icon(Icons.arrow_back),
+    );
     final controls = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -525,11 +553,12 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
         widget.isGuest ? 6 : 12,
       ),
       child: widget.isGuest
-          ? Align(alignment: AlignmentDirectional.centerEnd, child: controls)
+          ? Row(children: [back, const Spacer(), controls])
           : wide
           ? Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
+                back,
                 Expanded(child: greeting),
                 controls,
               ],
@@ -537,10 +566,7 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Align(
-                  alignment: AlignmentDirectional.centerEnd,
-                  child: controls,
-                ),
+                Row(children: [back, const Spacer(), controls]),
                 greeting,
               ],
             ),
@@ -1008,9 +1034,17 @@ class _HospitalDashboardState extends State<HospitalDashboard> {
                 description: 'Pediatric surgery waiting list by doctor',
                 icon: Icons.child_care_outlined,
                 colors: const [Color(0xFFF59E0B), Color(0xFFEF4444)],
-                onTap: () => _openSurgeryPage(
-                  (_) => const PediatricSurgeryDoctorsPage(),
-                ),
+                onTap: () => widget.isGuest
+                    ? Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const PediatricSurgeryDoctorsPage(
+                            guestPreview: true,
+                          ),
+                        ),
+                      )
+                    : _openSurgeryPage(
+                        (_) => const PediatricSurgeryDoctorsPage(),
+                      ),
               ),
             ),
           ],
