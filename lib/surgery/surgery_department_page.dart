@@ -1,10 +1,10 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:hospmaster/auth/account_button.dart';
 import 'package:hospmaster/surgery/admin_access.dart';
 import 'package:hospmaster/surgery/patient_follow_up_sheet_page.dart';
 import 'package:hospmaster/surgery/pediatric_surgery_waiting_repository.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -1137,7 +1137,6 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
     }
     final selectedDiagnoses = List<String>.from(diagnosisParts.$1);
     String? selectedSide = diagnosisParts.$2;
-    String? diagnosisToAdd;
     String? selectedDoctor = _doctorOptions.contains(initialPatient?.doctor)
         ? initialPatient?.doctor
         : widget.doctor ??
@@ -1147,6 +1146,25 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
     bool isSubmitting = false;
     String? ageError;
     String? diagnosisError;
+    final scrollController = ScrollController();
+    final basicKey = GlobalKey();
+    final ageKey = GlobalKey();
+    final diagnosisKey = GlobalKey();
+    final thumbnailFutures = <String, Future<Widget>>{};
+    final diagnosisCounts = <String, int>{};
+    for (final patient in _waitingPatients) {
+      for (final name in _parseDiagnosisParts(patient.diagnosis).$1) {
+        diagnosisCounts[name] = (diagnosisCounts[name] ?? 0) + 1;
+      }
+    }
+    // Most used diagnoses first; computed once so the chips do not reorder.
+    final diagnosisSuggestions =
+        ([..._diagnosisOptions]..sort(
+              (a, b) =>
+                  (diagnosisCounts[b] ?? 0).compareTo(diagnosisCounts[a] ?? 0),
+            ))
+            .take(10)
+            .toList(growable: false);
 
     nameController.text = initialPatient?.name ?? '';
     phoneController.text = initialPatient?.phone ?? '';
@@ -1267,126 +1285,402 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
               }
             }
 
-            return AlertDialog(
-              backgroundColor: const Color(0xFFF4F8FA),
-              surfaceTintColor: Colors.transparent,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24),
-              ),
-              insetPadding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 24,
-              ),
-              titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              title: Container(
-                padding: const EdgeInsets.all(13),
+            void scrollTo(GlobalKey key) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                final target = key.currentContext;
+                if (target == null) return;
+                Scrollable.ensureVisible(
+                  target,
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeOut,
+                  alignment: 0.05,
+                );
+              });
+            }
+
+            void closeDialog([_WaitingPatient? value]) {
+              FocusManager.instance.primaryFocus?.unfocus();
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (dialogContext.mounted) {
+                  Navigator.of(dialogContext).pop(value);
+                }
+              });
+            }
+
+            void fillAge({
+              String years = '',
+              String months = '',
+              String days = '',
+            }) {
+              setDialogState(() {
+                yearsController.text = years;
+                monthsController.text = months;
+                daysController.text = days;
+                ageError = null;
+              });
+            }
+
+            void toggleDiagnosis(String diagnosis, bool selected) {
+              setDialogState(() {
+                if (selected) {
+                  if (!selectedDiagnoses.contains(diagnosis)) {
+                    selectedDiagnoses.add(diagnosis);
+                  }
+                  diagnosisError = null;
+                } else {
+                  selectedDiagnoses.remove(diagnosis);
+                }
+              });
+            }
+
+            void submit() {
+              if (isSubmitting) return;
+              final formOk = formKey.currentState!.validate();
+              final ageText = _formatAge(
+                years: yearsController.text,
+                months: monthsController.text,
+                days: daysController.text,
+              );
+              setDialogState(() {
+                ageError = ageText == null
+                    ? 'املأ سنة أو شهر أو يوم على الأقل'
+                    : null;
+                diagnosisError = selectedDiagnoses.isEmpty
+                    ? 'اختر تشخيصًا واحدًا على الأقل'
+                    : null;
+              });
+
+              if (!formOk) {
+                scrollTo(basicKey);
+                return;
+              }
+              if (ageText == null) {
+                scrollTo(ageKey);
+                return;
+              }
+              if (selectedDiagnoses.isEmpty) {
+                scrollTo(diagnosisKey);
+                return;
+              }
+
+              final diagnosisJoined = selectedDiagnoses.join('، ');
+              final side = selectedSide?.trim();
+              final diagnosisFieldValue = (side != null && side.isNotEmpty)
+                  ? '$diagnosisJoined - $side'
+                  : diagnosisJoined;
+
+              setDialogState(() => isSubmitting = true);
+              closeDialog(
+                _WaitingPatient(
+                  id: initialPatient?.id,
+                  name: nameController.text.trim(),
+                  phone: phoneController.text.trim(),
+                  age: ageText,
+                  diagnosis: diagnosisFieldValue,
+                  notes: notesController.text.trim(),
+                  doctor: selectedDoctor ?? _doctorOptions.first,
+                  date: dateController.text.trim(),
+                  priority: initialPatient?.priority ?? 'جديد',
+                  workflowStage:
+                      initialPatient?.workflowStage ?? _newPatientWorkflowStage,
+                  images: List<_PatientImageAttachment>.from(patientImages),
+                  operationListDate: initialPatient?.operationListDate,
+                  callStatus: initialPatient?.callStatus ?? '',
+                ),
+              );
+            }
+
+            const teal = Color(0xFF087E8B);
+            final size = MediaQuery.sizeOf(context);
+            final compact = size.width < 640;
+            final ageSummary = _formatAge(
+              years: yearsController.text,
+              months: monthsController.text,
+              days: daysController.text,
+            );
+            final doneCount = [
+              nameController.text.trim().isNotEmpty,
+              ageSummary != null,
+              selectedDiagnoses.isNotEmpty,
+            ].where((done) => done).length;
+            final chipDiagnoses = [
+              ...diagnosisSuggestions,
+              for (final diagnosis in selectedDiagnoses)
+                if (!diagnosisSuggestions.contains(diagnosis)) diagnosis,
+            ];
+            final doctors = _doctorOptions;
+
+            Widget section({
+              required String title,
+              required IconData icon,
+              required List<Widget> children,
+              GlobalKey? sectionKey,
+            }) {
+              return Container(
+                key: sectionKey,
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF087E8B), Color(0xFF25A77F)],
-                    begin: Alignment.topRight,
-                    end: Alignment.bottomLeft,
-                  ),
+                  color: Colors.white,
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.78),
-                    width: 1.2,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF087E8B).withValues(alpha: 0.2),
-                      blurRadius: 14,
-                      offset: const Offset(0, 5),
+                  border: Border.all(color: const Color(0xFFD9E7EB)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(icon, size: 18, color: teal),
+                        const SizedBox(width: 6),
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF16324F),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    ...children,
+                  ],
+                ),
+              );
+            }
+
+            Widget errorText(String? text) => text == null
+                ? const SizedBox.shrink()
+                : Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      text,
+                      style: const TextStyle(
+                        color: Color(0xFFB91C1C),
+                        fontSize: 12,
+                      ),
+                    ),
+                  );
+
+            Widget ageField(
+              TextEditingController controller,
+              String label,
+              int max,
+            ) {
+              return Expanded(
+                child: TextFormField(
+                  controller: controller,
+                  textInputAction: TextInputAction.next,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(max),
+                  ],
+                  decoration: InputDecoration(labelText: label, isDense: true),
+                  onChanged: (_) => setDialogState(() => ageError = null),
+                ),
+              );
+            }
+
+            Widget imageTile(int index) {
+              final attachment = patientImages[index];
+              final cacheKey = attachment.localFile?.path ?? attachment.path!;
+              final thumbnail = thumbnailFutures.putIfAbsent(
+                cacheKey,
+                () async {
+                  final local = attachment.localFile;
+                  if (local != null) {
+                    return Image.memory(
+                      await local.readAsBytes(),
+                      fit: BoxFit.cover,
+                    );
+                  }
+                  final bytes = await _waitingRepository.memoryImage(
+                    attachment.path!,
+                  );
+                  if (bytes != null) {
+                    return Image.memory(bytes, fit: BoxFit.cover);
+                  }
+                  return Image.network(
+                    await _waitingRepository.imageUrl(attachment.path!),
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) =>
+                        const Icon(Icons.broken_image_outlined),
+                  );
+                },
+              );
+              return SizedBox(
+                width: 96,
+                child: Column(
+                  children: [
+                    Stack(
+                      children: [
+                        GestureDetector(
+                          onTap: () => previewAttachment(attachment),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: SizedBox(
+                              width: 96,
+                              height: 96,
+                              child: FutureBuilder<Widget>(
+                                future: thumbnail,
+                                builder: (context, snapshot) =>
+                                    snapshot.data ??
+                                    const ColoredBox(
+                                      color: Color(0xFFE2E8F0),
+                                      child: Center(
+                                        child: SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        PositionedDirectional(
+                          top: 2,
+                          end: 2,
+                          child: InkWell(
+                            onTap: () => setDialogState(
+                              () => patientImages.removeAt(index),
+                            ),
+                            child: const CircleAvatar(
+                              radius: 11,
+                              backgroundColor: Color(0xCC0F172A),
+                              child: Icon(
+                                Icons.close_rounded,
+                                size: 14,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    TextButton(
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(0, 28),
+                      ),
+                      onPressed: () => selectPatientImageDate(index),
+                      child: Text(
+                        attachment.uploadDate,
+                        style: const TextStyle(fontSize: 11),
+                      ),
                     ),
                   ],
                 ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.5),
-                        ),
-                      ),
-                      child: Icon(
-                        isEditing
-                            ? Icons.edit_note_rounded
-                            : Icons.person_add_alt_1_rounded,
-                        color: Colors.white,
-                        size: 22,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            isEditing ? 'تعديل بيانات المريض' : 'بيانات المريض',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          const Text(
-                            'ملف الرعاية والمتابعة',
-                            style: TextStyle(
-                              color: Color(0xFFE5F7F4),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+              );
+            }
+
+            final header = Container(
+              padding: const EdgeInsets.fromLTRB(16, 14, 8, 12),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF087E8B), Color(0xFF25A77F)],
+                  begin: Alignment.topRight,
+                  end: Alignment.bottomLeft,
                 ),
               ),
-              contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-              content: Theme(
-                data: Theme.of(context).copyWith(
-                  inputDecorationTheme: const InputDecorationTheme(
-                    filled: true,
-                    fillColor: Colors.white,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 11,
-                      vertical: 10,
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      shape: BoxShape.circle,
                     ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(14)),
-                      borderSide: BorderSide(color: Color(0xFFC9DDE2)),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(14)),
-                      borderSide: BorderSide(color: Color(0xFFC9DDE2)),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(14)),
-                      borderSide: BorderSide(
-                        color: Color(0xFF087E8B),
-                        width: 1.5,
-                      ),
+                    child: Icon(
+                      isEditing
+                          ? Icons.edit_note_rounded
+                          : Icons.person_add_alt_1_rounded,
+                      color: Colors.white,
                     ),
                   ),
-                ),
-                child: Form(
-                  key: formKey,
-                  child: SingleChildScrollView(
+                  const SizedBox(width: 10),
+                  Expanded(
                     child: Column(
-                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _ExpandOnFocusField(
+                        Text(
+                          isEditing ? 'تعديل بيانات المريض' : 'مريض جديد',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          'المطلوب: $doneCount/3',
+                          style: const TextStyle(
+                            color: Color(0xFFE5F7F4),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'إغلاق',
+                    onPressed: isSubmitting ? null : () => closeDialog(),
+                    icon: const Icon(Icons.close_rounded, color: Colors.white),
+                  ),
+                ],
+              ),
+            );
+
+            final form = Theme(
+              data: Theme.of(context).copyWith(
+                inputDecorationTheme: const InputDecorationTheme(
+                  filled: true,
+                  fillColor: Color(0xFFF8FBFC),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 11,
+                    vertical: 10,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(14)),
+                    borderSide: BorderSide(color: Color(0xFFC9DDE2)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(14)),
+                    borderSide: BorderSide(color: Color(0xFFC9DDE2)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(14)),
+                    borderSide: BorderSide(color: teal, width: 1.5),
+                  ),
+                ),
+              ),
+              child: Form(
+                key: formKey,
+                child: ListView(
+                  controller: scrollController,
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 24),
+                  children: [
+                    section(
+                      sectionKey: basicKey,
+                      title: 'بيانات المريض',
+                      icon: Icons.person_outline,
+                      children: [
+                        TextFormField(
                           controller: nameController,
+                          autofocus: !isEditing,
                           textInputAction: TextInputAction.next,
+                          textCapitalization: TextCapitalization.words,
+                          onChanged: (_) => setDialogState(() {}),
                           decoration: const InputDecoration(
-                            labelText: 'name',
-                            prefixIcon: Icon(Icons.person_outline),
+                            labelText: 'اسم المريض',
+                            prefixIcon: Icon(Icons.badge_outlined),
                             isDense: true,
                           ),
                           validator: (value) {
@@ -1396,485 +1690,276 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                             return null;
                           },
                         ),
-                        const SizedBox(height: 8),
-                        _ExpandOnFocusField(
+                        const SizedBox(height: 10),
+                        TextFormField(
                           controller: phoneController,
                           textInputAction: TextInputAction.next,
                           keyboardType: TextInputType.phone,
-                          expandedMinLines: 1,
-                          expandedMaxLines: 1,
                           decoration: const InputDecoration(
-                            labelText: 'phone',
+                            labelText: 'رقم الهاتف',
                             prefixIcon: Icon(Icons.phone_outlined),
-                            hintText: '11 رقمًا',
+                            helperText:
+                                '11 رقمًا لكل هاتف، ويمكن إضافة أكثر من رقم',
                             isDense: true,
                           ),
                           validator: _validatePhoneNumbers,
                         ),
-                        const SizedBox(height: 8),
+                      ],
+                    ),
+                    section(
+                      sectionKey: ageKey,
+                      title: 'السن',
+                      icon: Icons.cake_outlined,
+                      children: [
                         Row(
                           children: [
-                            Expanded(
-                              child: TextFormField(
-                                controller: yearsController,
-                                textInputAction: TextInputAction.next,
-                                keyboardType: TextInputType.number,
-                                decoration: const InputDecoration(
-                                  labelText: 'yrs',
-                                  isDense: true,
-                                ),
-                                onChanged: (_) {
-                                  if (ageError == null) return;
-                                  setDialogState(() {
-                                    ageError = null;
-                                  });
-                                },
-                              ),
-                            ),
+                            ageField(yearsController, 'سنة', 2),
                             const SizedBox(width: 8),
-                            Expanded(
-                              child: TextFormField(
-                                controller: monthsController,
-                                textInputAction: TextInputAction.next,
-                                keyboardType: TextInputType.number,
-                                decoration: const InputDecoration(
-                                  labelText: 'mth',
-                                  isDense: true,
-                                ),
-                                onChanged: (_) {
-                                  if (ageError == null) return;
-                                  setDialogState(() {
-                                    ageError = null;
-                                  });
-                                },
-                              ),
-                            ),
+                            ageField(monthsController, 'شهر', 2),
                             const SizedBox(width: 8),
-                            Expanded(
-                              child: TextFormField(
-                                controller: daysController,
-                                textInputAction: TextInputAction.next,
-                                keyboardType: TextInputType.number,
-                                decoration: const InputDecoration(
-                                  labelText: 'days',
-                                  isDense: true,
-                                ),
-                                onChanged: (_) {
-                                  if (ageError == null) return;
-                                  setDialogState(() {
-                                    ageError = null;
-                                  });
-                                },
-                              ),
+                            ageField(daysController, 'يوم', 3),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: [
+                            ActionChip(
+                              label: const Text('حديث الولادة'),
+                              onPressed: () => fillAge(days: '7'),
+                            ),
+                            ActionChip(
+                              label: const Text('6 شهور'),
+                              onPressed: () => fillAge(months: '6'),
+                            ),
+                            ActionChip(
+                              label: const Text('سنة'),
+                              onPressed: () => fillAge(years: '1'),
+                            ),
+                            ActionChip(
+                              label: const Text('3 سنوات'),
+                              onPressed: () => fillAge(years: '3'),
+                            ),
+                            ActionChip(
+                              label: const Text('5 سنوات'),
+                              onPressed: () => fillAge(years: '5'),
                             ),
                           ],
                         ),
-                        if (ageError != null) ...[
-                          const SizedBox(height: 6),
-                          Align(
-                            alignment: Alignment.centerRight,
+                        if (ageSummary != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
                             child: Text(
-                              ageError!,
+                              'السن: $ageSummary',
                               style: const TextStyle(
-                                color: Color(0xFFB91C1C),
                                 fontSize: 12,
+                                color: Color(0xFF0F766E),
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
                           ),
-                        ],
-                        const SizedBox(height: 10),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: Text(
-                            'diagnosis',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF64748B),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Column(
+                        errorText(ageError),
+                      ],
+                    ),
+                    section(
+                      sectionKey: diagnosisKey,
+                      title: 'التشخيص',
+                      icon: Icons.medical_information_outlined,
+                      children: [
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
                           children: [
-                            SizedBox(
-                              width: double.infinity,
-                              child: DropdownButtonFormField<String>(
-                                initialValue: diagnosisToAdd,
-                                isExpanded: true,
-                                decoration: const InputDecoration(
-                                  labelText: 'اختر التشخيص',
-                                  prefixIcon: Icon(
-                                    Icons.medical_information_outlined,
-                                  ),
-                                  isDense: true,
-                                ),
-                                items: _diagnosisOptions
-                                    .map(
-                                      (diagnosis) => DropdownMenuItem<String>(
-                                        value: diagnosis,
-                                        child: Text(
+                            for (final diagnosis in chipDiagnoses)
+                              FilterChip(
+                                label: Text(diagnosis),
+                                selected: selectedDiagnoses.contains(diagnosis),
+                                onSelected: (selected) =>
+                                    toggleDiagnosis(diagnosis, selected),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        LayoutBuilder(
+                          builder: (context, constraints) =>
+                              RawAutocomplete<String>(
+                                textEditingController:
+                                    customDiagnosisController,
+                                focusNode: customDiagnosisFocusNode,
+                                optionsBuilder: (value) {
+                                  final query = value.text.trim().toLowerCase();
+                                  if (query.isEmpty) {
+                                    return const Iterable<String>.empty();
+                                  }
+                                  return _diagnosisOptions.where(
+                                    (diagnosis) =>
+                                        !selectedDiagnoses.contains(
                                           diagnosis,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    )
-                                    .toList(),
-                                onChanged: (value) {
-                                  if (value == null) return;
+                                        ) &&
+                                        diagnosis.toLowerCase().contains(query),
+                                  );
+                                },
+                                onSelected: (diagnosis) {
                                   setDialogState(() {
-                                    diagnosisToAdd = value;
-                                    if (!selectedDiagnoses.contains(value)) {
-                                      selectedDiagnoses.add(value);
+                                    if (!selectedDiagnoses.contains(
+                                      diagnosis,
+                                    )) {
+                                      selectedDiagnoses.add(diagnosis);
                                     }
                                     diagnosisError = null;
+                                    customDiagnosisController.clear();
                                   });
                                 },
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            LayoutBuilder(
-                              builder: (context, constraints) =>
-                                  RawAutocomplete<String>(
-                                    textEditingController:
-                                        customDiagnosisController,
-                                    focusNode: customDiagnosisFocusNode,
-                                    optionsBuilder: (value) {
-                                      final query = value.text
-                                          .trim()
-                                          .toLowerCase();
-                                      if (query.isEmpty) {
-                                        return const Iterable<String>.empty();
-                                      }
-                                      return _diagnosisOptions.where(
-                                        (diagnosis) =>
-                                            !selectedDiagnoses.contains(
-                                              diagnosis,
-                                            ) &&
-                                            diagnosis.toLowerCase().contains(
-                                              query,
-                                            ),
-                                      );
-                                    },
-                                    onSelected: (diagnosis) {
-                                      setDialogState(() {
-                                        if (!selectedDiagnoses.contains(
-                                          diagnosis,
-                                        )) {
-                                          selectedDiagnoses.add(diagnosis);
-                                        }
-                                        diagnosisError = null;
-                                        customDiagnosisController.clear();
-                                      });
-                                    },
-                                    fieldViewBuilder:
-                                        (
-                                          context,
-                                          textController,
-                                          focusNode,
-                                          onFieldSubmitted,
-                                        ) => _ExpandOnFocusField(
-                                          controller: textController,
-                                          focusNode: focusNode,
-                                          textInputAction: TextInputAction.done,
-                                          onFieldSubmitted: (_) =>
-                                              addCustomDiagnosis(),
-                                          decoration: InputDecoration(
-                                            labelText:
-                                                'تشخيص جديد (اكتب لعرض الاقتراحات)',
-                                            prefixIcon: const Icon(
-                                              Icons.edit_note_outlined,
-                                            ),
-                                            isDense: true,
-                                            suffixIcon: IconButton(
-                                              tooltip: 'إضافة التشخيص',
-                                              onPressed: addCustomDiagnosis,
-                                              icon: const Icon(
-                                                Icons.add_rounded,
-                                              ),
-                                            ),
-                                          ),
+                                fieldViewBuilder:
+                                    (
+                                      context,
+                                      textController,
+                                      focusNode,
+                                      onFieldSubmitted,
+                                    ) => TextFormField(
+                                      controller: textController,
+                                      focusNode: focusNode,
+                                      textInputAction: TextInputAction.done,
+                                      onFieldSubmitted: (_) =>
+                                          addCustomDiagnosis(),
+                                      decoration: InputDecoration(
+                                        labelText:
+                                            'تشخيص آخر (اكتب للبحث أو للإضافة)',
+                                        prefixIcon: const Icon(
+                                          Icons.edit_note_outlined,
                                         ),
-                                    optionsViewBuilder:
-                                        (context, onSelected, options) => Align(
-                                          alignment:
-                                              AlignmentDirectional.topStart,
-                                          child: Material(
-                                            elevation: 4,
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                            child: ConstrainedBox(
-                                              constraints: BoxConstraints(
-                                                maxHeight: 200,
-                                                maxWidth: constraints.maxWidth,
-                                              ),
-                                              child: ListView.builder(
-                                                padding: EdgeInsets.zero,
-                                                shrinkWrap: true,
-                                                itemCount: options.length,
-                                                itemBuilder: (context, index) {
-                                                  final option = options
-                                                      .elementAt(index);
-                                                  return ListTile(
-                                                    dense: true,
-                                                    title: Text(option),
-                                                    onTap: () =>
-                                                        onSelected(option),
-                                                  );
-                                                },
-                                              ),
-                                            ),
-                                          ),
+                                        isDense: true,
+                                        suffixIcon: IconButton(
+                                          tooltip: 'إضافة التشخيص',
+                                          onPressed: addCustomDiagnosis,
+                                          icon: const Icon(Icons.add_rounded),
                                         ),
-                                  ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        if (selectedDiagnoses.isNotEmpty)
-                          SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: selectedDiagnoses
-                                  .map(
-                                    (diagnosis) => Padding(
-                                      padding: const EdgeInsets.only(left: 6),
-                                      child: InputChip(
-                                        label: Text(
-                                          diagnosis,
-                                          maxLines: 1,
-                                          softWrap: false,
-                                        ),
-                                        onDeleted: () {
-                                          setDialogState(() {
-                                            selectedDiagnoses.remove(diagnosis);
-                                          });
-                                        },
                                       ),
                                     ),
-                                  )
-                                  .toList(),
-                            ),
-                          ),
-                        if (diagnosisError != null) ...[
-                          const SizedBox(height: 6),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: Text(
-                              diagnosisError!,
-                              style: const TextStyle(
-                                color: Color(0xFFB91C1C),
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 8),
-                        _ExpandOnFocusField(
-                          controller: notesController,
-                          collapsedMaxLines: 3,
-                          expandedMinLines: 5,
-                          expandedMaxLines: 12,
-                          keyboardType: TextInputType.multiline,
-                          textInputAction: TextInputAction.newline,
-                          decoration: const InputDecoration(
-                            labelText: 'ملاحظات هامة (اختياري)',
-                            hintText: 'اكتب أي ملاحظة مهمة عن حالة المريض',
-                            prefixIcon: Icon(Icons.note_alt_outlined),
-                            isDense: true,
-                            alignLabelWithHint: true,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            const Expanded(
-                              child: Text(
-                                'صور المريض',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFF64748B),
-                                ),
-                              ),
-                            ),
-                            OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                visualDensity: VisualDensity.compact,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 7,
-                                ),
-                              ),
-                              onPressed: selectPatientImages,
-                              icon: const Icon(
-                                Icons.add_photo_alternate_outlined,
-                              ),
-                              label: const Text('إضافة صور'),
-                            ),
-                          ],
-                        ),
-                        for (
-                          var index = 0;
-                          index < patientImages.length;
-                          index++
-                        )
-                          Container(
-                            margin: const EdgeInsets.only(bottom: 6),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF1F5F9),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Row(
-                              children: [
-                                IconButton(
-                                  tooltip: 'عرض الصورة وتكبيرها',
-                                  visualDensity: VisualDensity.compact,
-                                  onPressed: () =>
-                                      previewAttachment(patientImages[index]),
-                                  icon: const Icon(
-                                    Icons.zoom_in_rounded,
-                                    size: 22,
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Text(
-                                    patientImages[index].localFile?.name ??
-                                        patientImages[index].path!
-                                            .split('/')
-                                            .last,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    textDirection: TextDirection.ltr,
-                                  ),
-                                ),
-                                TextButton.icon(
-                                  onPressed: () =>
-                                      selectPatientImageDate(index),
-                                  icon: const Icon(
-                                    Icons.calendar_month_outlined,
-                                    size: 16,
-                                  ),
-                                  label: Text(patientImages[index].uploadDate),
-                                ),
-                                IconButton(
-                                  tooltip: 'حذف الصورة',
-                                  visualDensity: VisualDensity.compact,
-                                  onPressed: () {
-                                    setDialogState(() {
-                                      patientImages.removeAt(index);
-                                    });
-                                  },
-                                  icon: const Icon(
-                                    Icons.close_rounded,
-                                    size: 18,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: DropdownButtonFormField<String>(
-                                initialValue: selectedDoctor,
-                                isExpanded: true,
-                                decoration: const InputDecoration(
-                                  labelText: 'Doctor',
-                                  prefixIcon: Icon(Icons.person_pin_outlined),
-                                  isDense: true,
-                                ),
-                                items: _doctorOptions
-                                    .map(
-                                      (doctor) => DropdownMenuItem<String>(
-                                        value: doctor,
-                                        child: Text(
-                                          doctor,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    )
-                                    .toList(),
-                                onChanged: (value) {
-                                  setDialogState(() {
-                                    selectedDoctor = value;
-                                  });
-                                },
-                                validator: (value) {
-                                  if (value == null || value.isEmpty) {
-                                    return 'اختر الطبيب المعالج';
-                                  }
-                                  return null;
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: DropdownButtonFormField<String>(
-                                initialValue: selectedSide,
-                                isExpanded: true,
-                                decoration: InputDecoration(
-                                  labelText: 'side (اختياري)',
-                                  prefixIcon: const Icon(
-                                    Icons.swap_horiz_rounded,
-                                  ),
-                                  isDense: true,
-                                  suffixIcon: selectedSide == null
-                                      ? null
-                                      : IconButton(
-                                          tooltip: 'مسح الاختيار',
-                                          icon: const Icon(
-                                            Icons.close_rounded,
-                                            size: 18,
+                                optionsViewBuilder:
+                                    (context, onSelected, options) => Align(
+                                      alignment: AlignmentDirectional.topStart,
+                                      child: Material(
+                                        elevation: 4,
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: ConstrainedBox(
+                                          constraints: BoxConstraints(
+                                            maxHeight: 200,
+                                            maxWidth: constraints.maxWidth,
                                           ),
-                                          onPressed: () {
-                                            setDialogState(() {
-                                              selectedSide = null;
-                                            });
-                                          },
+                                          child: ListView.builder(
+                                            padding: EdgeInsets.zero,
+                                            shrinkWrap: true,
+                                            itemCount: options.length,
+                                            itemBuilder: (context, index) {
+                                              final option = options.elementAt(
+                                                index,
+                                              );
+                                              return ListTile(
+                                                dense: true,
+                                                title: Text(option),
+                                                onTap: () => onSelected(option),
+                                              );
+                                            },
+                                          ),
                                         ),
-                                ),
-                                items: _sideOptions
-                                    .map(
-                                      (side) => DropdownMenuItem<String>(
-                                        value: side,
-                                        child: Text(side),
                                       ),
-                                    )
-                                    .toList(),
-                                onChanged: (value) {
-                                  setDialogState(() {
-                                    selectedSide = value;
-                                  });
-                                },
+                                    ),
                               ),
-                            ),
+                        ),
+                        errorText(diagnosisError),
+                        const SizedBox(height: 10),
+                        const Text(
+                          'الجانب (اختياري)',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Wrap(
+                          spacing: 6,
+                          children: [
+                            for (final side in _sideOptions)
+                              ChoiceChip(
+                                label: Text(side),
+                                selected: selectedSide == side,
+                                onSelected: (selected) => setDialogState(
+                                  () => selectedSide = selected ? side : null,
+                                ),
+                              ),
                           ],
                         ),
-                        const SizedBox(height: 8),
+                      ],
+                    ),
+                    section(
+                      title: 'الطبيب والتاريخ',
+                      icon: Icons.event_note_outlined,
+                      children: [
+                        if (doctors.length <= 6)
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: [
+                              for (final doctor in doctors)
+                                ChoiceChip(
+                                  label: Text(doctor),
+                                  selected: selectedDoctor == doctor,
+                                  onSelected: (_) => setDialogState(
+                                    () => selectedDoctor = doctor,
+                                  ),
+                                ),
+                            ],
+                          )
+                        else
+                          DropdownButtonFormField<String>(
+                            initialValue: doctors.contains(selectedDoctor)
+                                ? selectedDoctor
+                                : null,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              labelText: 'الطبيب',
+                              prefixIcon: Icon(Icons.person_pin_outlined),
+                              isDense: true,
+                            ),
+                            items: [
+                              for (final doctor in doctors)
+                                DropdownMenuItem(
+                                  value: doctor,
+                                  child: Text(
+                                    doctor,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                            onChanged: (value) =>
+                                setDialogState(() => selectedDoctor = value),
+                          ),
+                        const SizedBox(height: 10),
                         TextFormField(
                           controller: dateController,
                           readOnly: true,
                           onTap: canChangeDate ? selectDate : null,
                           decoration: InputDecoration(
-                            labelText: 'Date',
+                            labelText: 'التاريخ',
                             prefixIcon: const Icon(
                               Icons.calendar_today_outlined,
                             ),
                             suffixIcon: canChangeDate
-                                ? const Icon(Icons.edit_outlined)
+                                ? TextButton(
+                                    onPressed: () => setDialogState(() {
+                                      dateController.text = _formatDate(
+                                        DateTime.now(),
+                                      );
+                                    }),
+                                    child: const Text('اليوم'),
+                                  )
                                 : const Icon(Icons.lock_outline),
                             isDense: true,
                             helperText: canChangeDate
-                                ? 'يمكن تعديل التاريخ'
+                                ? 'اضغط لتغيير التاريخ'
                                 : 'لا يمكن تغيير التاريخ إلا للأدمن',
                           ),
                           validator: (value) {
@@ -1886,98 +1971,142 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
                         ),
                       ],
                     ),
-                  ),
+                    section(
+                      title: 'ملاحظات',
+                      icon: Icons.note_alt_outlined,
+                      children: [
+                        TextFormField(
+                          controller: notesController,
+                          minLines: 3,
+                          maxLines: 8,
+                          keyboardType: TextInputType.multiline,
+                          textInputAction: TextInputAction.newline,
+                          decoration: const InputDecoration(
+                            hintText: 'اكتب أي ملاحظة مهمة عن حالة المريض',
+                            isDense: true,
+                          ),
+                        ),
+                      ],
+                    ),
+                    section(
+                      title: 'صور المريض',
+                      icon: Icons.photo_library_outlined,
+                      children: [
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (var i = 0; i < patientImages.length; i++)
+                              imageTile(i),
+                            InkWell(
+                              onTap: selectPatientImages,
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                width: 96,
+                                height: 96,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: teal),
+                                  color: const Color(0xFFE6F4F1),
+                                ),
+                                child: const Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.add_photo_alternate_outlined,
+                                      color: teal,
+                                    ),
+                                    SizedBox(height: 4),
+                                    Text(
+                                      'إضافة صور',
+                                      style: TextStyle(
+                                        color: teal,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-              actions: [
-                TextButton(
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF64748B),
+            );
+
+            final footer = Container(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(top: BorderSide(color: Color(0xFFD9E7EB))),
+              ),
+              child: Row(
+                children: [
+                  TextButton(
+                    onPressed: isSubmitting ? null : () => closeDialog(),
+                    child: const Text('إلغاء'),
                   ),
-                  onPressed: isSubmitting
-                      ? null
-                      : () {
-                          FocusManager.instance.primaryFocus?.unfocus();
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (context.mounted) {
-                              Navigator.of(context).pop();
-                            }
-                          });
-                        },
-                  child: const Text('إلغاء'),
-                ),
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF087E8B),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+                  const Spacer(),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: teal,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 22,
+                        vertical: 12,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
+                    onPressed: isSubmitting ? null : submit,
+                    icon: Icon(
+                      isEditing ? Icons.save_outlined : Icons.check_rounded,
+                    ),
+                    label: Text(isEditing ? 'حفظ التعديل' : 'إضافة المريض'),
                   ),
-                  onPressed: () {
-                    if (isSubmitting) return;
-                    if (!formKey.currentState!.validate()) return;
+                ],
+              ),
+            );
 
-                    if (selectedDiagnoses.isEmpty) {
-                      setDialogState(() {
-                        diagnosisError = 'اختر تشخيصًا واحدًا على الأقل';
-                      });
-                      return;
-                    }
-
-                    final ageText = _formatAge(
-                      years: yearsController.text,
-                      months: monthsController.text,
-                      days: daysController.text,
-                    );
-                    if (ageText == null) {
-                      setDialogState(() {
-                        ageError = 'املأ سنة أو شهر أو يوم على الأقل';
-                      });
-                      return;
-                    }
-
-                    final diagnosisJoined = selectedDiagnoses.join('، ');
-                    final side = selectedSide?.trim();
-                    final diagnosisFieldValue =
-                        (side != null && side.isNotEmpty)
-                        ? '$diagnosisJoined - $side'
-                        : diagnosisJoined;
-
-                    setDialogState(() {
-                      isSubmitting = true;
-                      ageError = null;
-                      diagnosisError = null;
-                    });
-
-                    final patient = _WaitingPatient(
-                      id: initialPatient?.id,
-                      name: nameController.text.trim(),
-                      phone: phoneController.text.trim(),
-                      age: ageText,
-                      diagnosis: diagnosisFieldValue,
-                      notes: notesController.text.trim(),
-                      doctor: selectedDoctor ?? _doctorOptions.first,
-                      date: dateController.text.trim(),
-                      priority: initialPatient?.priority ?? 'جديد',
-                      workflowStage:
-                          initialPatient?.workflowStage ??
-                          _newPatientWorkflowStage,
-                      images: List<_PatientImageAttachment>.from(patientImages),
-                      operationListDate: initialPatient?.operationListDate,
-                      callStatus: initialPatient?.callStatus ?? '',
-                    );
-
-                    FocusManager.instance.primaryFocus?.unfocus();
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (context.mounted) {
-                        Navigator.of(context).pop(patient);
-                      }
-                    });
-                  },
-                  child: Text(isEditing ? 'حفظ التعديل' : 'إضافة'),
+            final content = Directionality(
+              textDirection: TextDirection.rtl,
+              child: Scaffold(
+                backgroundColor: const Color(0xFFF4F8FA),
+                resizeToAvoidBottomInset: true,
+                body: Column(
+                  children: [
+                    header,
+                    LinearProgressIndicator(
+                      value: doneCount / 3,
+                      minHeight: 3,
+                      backgroundColor: const Color(0xFFD9E7EB),
+                      color: const Color(0xFF25A77F),
+                    ),
+                    Expanded(child: form),
+                    footer,
+                  ],
                 ),
-              ],
+              ),
+            );
+
+            if (compact) {
+              return Dialog.fullscreen(child: content);
+            }
+            return Dialog(
+              insetPadding: const EdgeInsets.all(24),
+              clipBehavior: Clip.antiAlias,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: SizedBox(
+                width: 680,
+                height: size.height * 0.9,
+                child: content,
+              ),
             );
           },
         );
@@ -1993,6 +2122,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
     customDiagnosisFocusNode.dispose();
     notesController.dispose();
     dateController.dispose();
+    scrollController.dispose();
 
     if (result == null || !mounted) return;
 
@@ -2489,6 +2619,18 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
     return (diagnosisNames, side);
   }
 
+  Future<void> _showPatientDetails(_WaitingPatient patient) {
+    return showDialog<void>(
+      context: context,
+      builder: (_) => _PatientDetailsDialog(
+        patient: patient,
+        imagePage: _storedImagePage,
+        onEdit: () => _showAddPatientDialog(patient),
+        onOpenImages: () => _showPatientImages(patient),
+      ),
+    );
+  }
+
   Widget _buildPatientCardForStage(
     _WaitingPatient patient,
     int sequenceNumber,
@@ -2496,6 +2638,7 @@ class _PediatricSurgeryPageState extends State<PediatricSurgeryPage>
     return _WaitingPatientCard(
       patient: patient,
       sequenceNumber: sequenceNumber,
+      onViewPressed: () => _showPatientDetails(patient),
       onEditPressed: () => _showAddPatientDialog(patient),
       onImagesPressed: () => _showPatientImages(patient),
       onAddToOperationListPressed: () => _showOperationListDateDialog(patient),
@@ -4752,6 +4895,7 @@ class _WaitingPatientCard extends StatelessWidget {
   const _WaitingPatientCard({
     required this.patient,
     required this.sequenceNumber,
+    required this.onViewPressed,
     required this.onEditPressed,
     required this.onImagesPressed,
     required this.onAddToOperationListPressed,
@@ -4768,6 +4912,7 @@ class _WaitingPatientCard extends StatelessWidget {
 
   final _WaitingPatient patient;
   final int sequenceNumber;
+  final VoidCallback onViewPressed;
   final VoidCallback onEditPressed;
   final VoidCallback onImagesPressed;
   final VoidCallback onAddToOperationListPressed;
@@ -4830,234 +4975,568 @@ class _WaitingPatientCard extends StatelessWidget {
     final diagnosisHasArabic = _arabicLetterPattern.hasMatch(patient.diagnosis);
 
     return RepaintBoundary(
-      child: Container(
-        padding: const EdgeInsets.all(1),
-        decoration: BoxDecoration(
-          color: accentColor.withValues(alpha: 0.32),
-          borderRadius: BorderRadius.circular(22),
-        ),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(2, 0, 2, 10),
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(21),
-            color: const Color(0xFF6082B6),
-            border: Border.all(
-              color: accentColor.withValues(alpha: 0.48),
-              width: 1.2,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: onViewPressed,
+          child: Container(
+            padding: const EdgeInsets.all(1),
+            decoration: BoxDecoration(
+              color: accentColor.withValues(alpha: 0.32),
+              borderRadius: BorderRadius.circular(22),
             ),
-          ),
-          child: Stack(
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(2, 0, 2, 10),
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(21),
+                color: const Color(0xFF6082B6),
+                border: Border.all(
+                  color: accentColor.withValues(alpha: 0.48),
+                  width: 1.2,
+                ),
+              ),
+              child: Stack(
                 children: [
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 9,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.38),
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.white.withValues(alpha: 0.07),
-                          blurRadius: 10,
-                          spreadRadius: 1,
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 9,
                         ),
-                      ],
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Container(
-                          constraints: const BoxConstraints(minWidth: 30),
-                          height: 28,
-                          padding: const EdgeInsets.symmetric(horizontal: 7),
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(9),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.38),
                           ),
-                          child: Text(
-                            '$sequenceNumber',
-                            style: TextStyle(
-                              color: accentColor,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w900,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.white.withValues(alpha: 0.07),
+                              blurRadius: 10,
+                              spreadRadius: 1,
                             ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _MarqueePatientName(name: patient.name),
-                              if (showStageBadge || showPriorityBadge) ...[
-                                const SizedBox(height: 6),
-                                Wrap(
-                                  spacing: 6,
-                                  runSpacing: 6,
-                                  children: [
-                                    if (showStageBadge)
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 3,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: accentColor.withValues(
-                                            alpha: 0.16,
-                                          ),
-                                          borderRadius: BorderRadius.circular(
-                                            999,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          _stageLabel(),
-                                          style: TextStyle(
-                                            color: accentColor,
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 11,
-                                          ),
-                                        ),
-                                      ),
-                                    if (onCallStatusChanged != null)
-                                      _CallStatusButton(
-                                        status: patient.callStatus,
-                                        onChanged: onCallStatusChanged!,
-                                      ),
-                                    if (showPriorityBadge)
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 3,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFFFEE2E2),
-                                          borderRadius: BorderRadius.circular(
-                                            999,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          priority,
-                                          style: const TextStyle(
-                                            color: Color(0xFFB91C1C),
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 11,
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                        if (patient.notes.trim().isNotEmpty) ...[
-                          const SizedBox(width: 6),
-                          _PatientNoteBadge(
-                            onPressed: () =>
-                                _showPatientNoteDialog(context, patient.notes),
-                          ),
-                        ],
-                        const SizedBox(width: 8),
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 112),
-                          child: _InfoChip(
-                            label: patient.diagnosis,
-                            accentColor: accentColor,
-                            backgroundColor: Colors.white.withValues(
-                              alpha: 0.82,
-                            ),
-                            textAlign: diagnosisHasArabic
-                                ? TextAlign.right
-                                : TextAlign.left,
-                            textDirection: diagnosisHasArabic
-                                ? TextDirection.rtl
-                                : TextDirection.ltr,
-                            horizontalPadding: 6,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _PatientActionsMenu(
-                              accentColor: accentColor,
-                              hasPhone: patient.phone.trim().isNotEmpty,
-                              onEditPressed: onEditPressed,
-                              onAddToOperationListPressed:
-                                  onAddToOperationListPressed,
-                              onRemoveFromOperationListPressed:
-                                  onRemoveFromOperationListPressed,
-                              onCallPressed: () =>
-                                  _callPhone(context, patient.phone),
-                              onDeletePressed: onDeletePressed,
-                              onMoveToFollowUpPressed: onMoveToFollowUpPressed,
-                              onMoveToAdmissionPressed:
-                                  onMoveToAdmissionPressed,
-                              onMoveToStagedOperationsPressed:
-                                  onMoveToStagedOperationsPressed,
-                              onMoveToPicuPressed: onMoveToPicuPressed,
-                              onMoveToNicuPressed: onMoveToNicuPressed,
-                              onMoveToWaitingPressed: onMoveToWaitingPressed,
-                            ),
-                            if (patient.images.isNotEmpty)
-                              SizedBox(
-                                width: 30,
-                                height: 30,
-                                child: IconButton(
-                                  tooltip: 'عرض صور المريض',
-                                  onPressed: onImagesPressed,
-                                  visualDensity: VisualDensity.compact,
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 30,
-                                    height: 30,
-                                  ),
-                                  icon: const Icon(
-                                    Icons.image_outlined,
-                                    color: Colors.white,
-                                    size: 21,
-                                  ),
-                                ),
-                              ),
                           ],
                         ),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: _InfoChip(
-                            icon: Icons.person_pin_outlined,
-                            label: patient.doctor,
-                            accentColor: const Color(0xFFB7791F),
-                            gradient: const LinearGradient(
-                              colors: [Color(0xFFFFF1A8), Color(0xFFE8A317)],
-                              begin: Alignment.topRight,
-                              end: Alignment.bottomLeft,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Container(
+                              constraints: const BoxConstraints(minWidth: 30),
+                              height: 28,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                              ),
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(9),
+                              ),
+                              child: Text(
+                                '$sequenceNumber',
+                                style: TextStyle(
+                                  color: accentColor,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
                             ),
-                          ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _MarqueePatientName(name: patient.name),
+                                  if (showStageBadge || showPriorityBadge) ...[
+                                    const SizedBox(height: 6),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 6,
+                                      children: [
+                                        if (showStageBadge)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 3,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: accentColor.withValues(
+                                                alpha: 0.16,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                            ),
+                                            child: Text(
+                                              _stageLabel(),
+                                              style: TextStyle(
+                                                color: accentColor,
+                                                fontWeight: FontWeight.w700,
+                                                fontSize: 11,
+                                              ),
+                                            ),
+                                          ),
+                                        if (onCallStatusChanged != null)
+                                          _CallStatusButton(
+                                            status: patient.callStatus,
+                                            onChanged: onCallStatusChanged!,
+                                          ),
+                                        if (showPriorityBadge)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 3,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFFEE2E2),
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                            ),
+                                            child: Text(
+                                              priority,
+                                              style: const TextStyle(
+                                                color: Color(0xFFB91C1C),
+                                                fontWeight: FontWeight.w700,
+                                                fontSize: 11,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            if (patient.notes.trim().isNotEmpty) ...[
+                              const SizedBox(width: 6),
+                              _PatientNoteBadge(
+                                onPressed: () => _showPatientNoteDialog(
+                                  context,
+                                  patient.notes,
+                                ),
+                              ),
+                            ],
+                            const SizedBox(width: 8),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 112),
+                              child: _InfoChip(
+                                label: patient.diagnosis,
+                                accentColor: accentColor,
+                                backgroundColor: Colors.white.withValues(
+                                  alpha: 0.82,
+                                ),
+                                textAlign: diagnosisHasArabic
+                                    ? TextAlign.right
+                                    : TextAlign.left,
+                                textDirection: diagnosisHasArabic
+                                    ? TextDirection.rtl
+                                    : TextDirection.ltr,
+                                horizontalPadding: 6,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _PatientActionsMenu(
+                                  accentColor: accentColor,
+                                  hasPhone: patient.phone.trim().isNotEmpty,
+                                  onEditPressed: onEditPressed,
+                                  onAddToOperationListPressed:
+                                      onAddToOperationListPressed,
+                                  onRemoveFromOperationListPressed:
+                                      onRemoveFromOperationListPressed,
+                                  onCallPressed: () =>
+                                      _callPhone(context, patient.phone),
+                                  onDeletePressed: onDeletePressed,
+                                  onMoveToFollowUpPressed:
+                                      onMoveToFollowUpPressed,
+                                  onMoveToAdmissionPressed:
+                                      onMoveToAdmissionPressed,
+                                  onMoveToStagedOperationsPressed:
+                                      onMoveToStagedOperationsPressed,
+                                  onMoveToPicuPressed: onMoveToPicuPressed,
+                                  onMoveToNicuPressed: onMoveToNicuPressed,
+                                  onMoveToWaitingPressed:
+                                      onMoveToWaitingPressed,
+                                ),
+                                if (patient.images.isNotEmpty)
+                                  SizedBox(
+                                    width: 30,
+                                    height: 30,
+                                    child: IconButton(
+                                      tooltip: 'عرض صور المريض',
+                                      onPressed: onImagesPressed,
+                                      visualDensity: VisualDensity.compact,
+                                      padding: EdgeInsets.zero,
+                                      constraints:
+                                          const BoxConstraints.tightFor(
+                                            width: 30,
+                                            height: 30,
+                                          ),
+                                      icon: const Icon(
+                                        Icons.image_outlined,
+                                        color: Colors.white,
+                                        size: 21,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 6),
-                        _DateInfoChip(date: patient.date),
-                        const SizedBox(width: 6),
-                        _AgeInfoChip(age: patient.currentAge),
-                      ],
-                    ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: _InfoChip(
+                                icon: Icons.person_pin_outlined,
+                                label: patient.doctor,
+                                accentColor: const Color(0xFFB7791F),
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFFFFF1A8),
+                                    Color(0xFFE8A317),
+                                  ],
+                                  begin: Alignment.topRight,
+                                  end: Alignment.bottomLeft,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            _DateInfoChip(date: patient.date),
+                            const SizedBox(width: 6),
+                            _AgeInfoChip(age: patient.currentAge),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _workflowStageLabel(String stage) => switch (stage) {
+  'picu' => 'PICU',
+  'nicu' => 'NICU',
+  'emergency' => 'Emergency',
+  'follow_up' => 'المتابعة',
+  'admission' => 'الحجز',
+  'staged_operations' => 'العمليات المرحلية',
+  _ => 'الانتظار',
+};
+
+/// Read-only summary of a patient, opened by tapping the patient card.
+class _PatientDetailsDialog extends StatefulWidget {
+  const _PatientDetailsDialog({
+    required this.patient,
+    required this.imagePage,
+    required this.onEdit,
+    required this.onOpenImages,
+  });
+
+  final _WaitingPatient patient;
+  final Future<Widget> Function(String path) imagePage;
+  final VoidCallback onEdit;
+  final VoidCallback onOpenImages;
+
+  @override
+  State<_PatientDetailsDialog> createState() => _PatientDetailsDialogState();
+}
+
+class _PatientDetailsDialogState extends State<_PatientDetailsDialog> {
+  static const _teal = Color(0xFF087E8B);
+  late final List<Future<Widget>> _thumbnails = [
+    for (final image in widget.patient.images)
+      if (image.path != null) widget.imagePage(image.path!),
+  ];
+
+  Widget _section(String title, IconData icon, Widget child) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFD9E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: _teal),
+              const SizedBox(width: 6),
+              Text(
+                title,
+                textDirection: TextDirection.ltr,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF16324F),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _row(String label, String value, {VoidCallback? onTap}) {
+    if (value.trim().isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 112,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                color: Color(0xFF64748B),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Expanded(
+            child: GestureDetector(
+              onTap: onTap,
+              child: Text(
+                value,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: onTap == null
+                      ? const Color(0xFF16324F)
+                      : const Color(0xFF15803D),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final patient = widget.patient;
+    final size = MediaQuery.sizeOf(context);
+    final priority = patient.priority.trim();
+    final callLabel = switch (patient.callStatus) {
+      'called' => 'called',
+      'no_reply' => 'no reply',
+      'closed' => 'closed',
+      _ => '',
+    };
+
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Dialog(
+        insetPadding: const EdgeInsets.all(16),
+        clipBehavior: Clip.antiAlias,
+        backgroundColor: const Color(0xFFF4F8FA),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 600,
+            maxHeight: size.height * 0.9,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFF087E8B), Color(0xFF25A77F)],
+                    begin: Alignment.topRight,
+                    end: Alignment.bottomLeft,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const CircleAvatar(
+                      backgroundColor: Color(0x33FFFFFF),
+                      child: Icon(
+                        Icons.child_care_outlined,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            patient.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          Text(
+                            '${_workflowStageLabel(patient.workflowStage)} • ${patient.currentAge}',
+                            style: const TextStyle(
+                              color: Color(0xFFE5F7F4),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'إغلاق',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.all(14),
+                  children: [
+                    _section(
+                      'OP. Details',
+                      Icons.local_hospital_outlined,
+                      Column(
+                        children: [
+                          _row('التشخيص', patient.diagnosis),
+                          _row('الطبيب', patient.doctor),
+                          _row('تاريخ التسجيل', patient.date),
+                          _row('السن الآن', patient.currentAge),
+                          _row(
+                            'الهاتف',
+                            patient.phone,
+                            onTap: patient.phone.trim().isEmpty
+                                ? null
+                                : () => _callPhone(context, patient.phone),
+                          ),
+                          _row(
+                            'المرحلة',
+                            _workflowStageLabel(patient.workflowStage),
+                          ),
+                          _row(
+                            'قائمة العمليات',
+                            patient.operationListDate ?? '',
+                          ),
+                          _row('حالة الاتصال', callLabel),
+                          _row('الأولوية', priority == 'جديد' ? '' : priority),
+                        ],
+                      ),
+                    ),
+                    _section(
+                      'Pictures',
+                      Icons.photo_library_outlined,
+                      _thumbnails.isEmpty
+                          ? const Text(
+                              'لا توجد صور',
+                              style: TextStyle(color: Color(0xFF64748B)),
+                            )
+                          : Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final thumbnail in _thumbnails)
+                                  GestureDetector(
+                                    onTap: widget.onOpenImages,
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: Container(
+                                        width: 104,
+                                        height: 104,
+                                        color: const Color(0xFF0F172A),
+                                        child: FutureBuilder<Widget>(
+                                          future: thumbnail,
+                                          builder: (context, snapshot) =>
+                                              snapshot.data ??
+                                              Center(
+                                                child: snapshot.hasError
+                                                    ? const Icon(
+                                                        Icons
+                                                            .broken_image_outlined,
+                                                        color: Colors.white70,
+                                                      )
+                                                    : const SizedBox(
+                                                        width: 20,
+                                                        height: 20,
+                                                        child:
+                                                            CircularProgressIndicator(
+                                                              strokeWidth: 2,
+                                                            ),
+                                                      ),
+                                              ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                    ),
+                    _section(
+                      'Notes',
+                      Icons.note_alt_outlined,
+                      patient.notes.trim().isEmpty
+                          ? const Text(
+                              'لا توجد ملاحظات',
+                              style: TextStyle(color: Color(0xFF64748B)),
+                            )
+                          : SelectableText(
+                              patient.notes,
+                              style: const TextStyle(fontSize: 14, height: 1.5),
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  border: Border(top: BorderSide(color: Color(0xFFD9E7EB))),
+                ),
+                child: Row(
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('إغلاق'),
+                    ),
+                    const Spacer(),
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(backgroundColor: _teal),
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        widget.onEdit();
+                      },
+                      icon: const Icon(Icons.edit_outlined),
+                      label: const Text('تعديل'),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -5653,88 +6132,6 @@ class _StatusCard extends StatelessWidget {
             ),
           );
         },
-      ),
-    );
-  }
-}
-
-class _ExpandOnFocusField extends StatefulWidget {
-  const _ExpandOnFocusField({
-    required this.controller,
-    required this.decoration,
-    this.focusNode,
-    this.validator,
-    this.keyboardType = TextInputType.text,
-    this.textInputAction,
-    this.onFieldSubmitted,
-    this.collapsedMaxLines = 1,
-    this.expandedMinLines = 2,
-    this.expandedMaxLines = 5,
-  });
-
-  final TextEditingController controller;
-  final InputDecoration decoration;
-  final FocusNode? focusNode;
-  final FormFieldValidator<String>? validator;
-  final TextInputType keyboardType;
-  final TextInputAction? textInputAction;
-  final ValueChanged<String>? onFieldSubmitted;
-  final int collapsedMaxLines;
-  final int expandedMinLines;
-  final int expandedMaxLines;
-
-  @override
-  State<_ExpandOnFocusField> createState() => _ExpandOnFocusFieldState();
-}
-
-class _ExpandOnFocusFieldState extends State<_ExpandOnFocusField> {
-  FocusNode? _ownedFocusNode;
-  FocusNode get _focusNode =>
-      widget.focusNode ?? (_ownedFocusNode ??= FocusNode());
-  late FocusNode _listenedNode;
-
-  @override
-  void initState() {
-    super.initState();
-    _listenedNode = _focusNode..addListener(_handleFocusChange);
-  }
-
-  @override
-  void didUpdateWidget(covariant _ExpandOnFocusField oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!identical(_focusNode, _listenedNode)) {
-      _listenedNode.removeListener(_handleFocusChange);
-      _listenedNode = _focusNode..addListener(_handleFocusChange);
-    }
-  }
-
-  @override
-  void dispose() {
-    _listenedNode.removeListener(_handleFocusChange);
-    _ownedFocusNode?.dispose();
-    super.dispose();
-  }
-
-  void _handleFocusChange() {
-    if (mounted) setState(() {});
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final expanded = _focusNode.hasFocus;
-    return AnimatedSize(
-      duration: const Duration(milliseconds: 150),
-      alignment: Alignment.topCenter,
-      child: TextFormField(
-        controller: widget.controller,
-        focusNode: _focusNode,
-        keyboardType: widget.keyboardType,
-        textInputAction: widget.textInputAction,
-        minLines: expanded ? widget.expandedMinLines : 1,
-        maxLines: expanded ? widget.expandedMaxLines : widget.collapsedMaxLines,
-        decoration: widget.decoration,
-        validator: widget.validator,
-        onFieldSubmitted: widget.onFieldSubmitted,
       ),
     );
   }
