@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:hospmaster/auth/account_button.dart';
 import 'package:image_picker/image_picker.dart';
 
-import 'patient_profile_page.dart';
+import 'custom_field_options.dart';
 import 'patient_record.dart';
 import 'patient_repository.dart';
 
@@ -23,137 +23,6 @@ class PatientFollowUpSheetPage extends StatefulWidget {
 class _PatientFollowUpSheetPageState extends State<PatientFollowUpSheetPage> {
   late final SurgeryPatientRepository _repository =
       widget.repository ?? SurgeryPatientRepository();
-  List<PatientRecord> _activePatients = [];
-  bool _isLoadingPatients = true;
-  String? _patientsError;
-
-  final _formKey = GlobalKey<FormState>();
-  final _patientNameController = TextEditingController();
-  final _patientIdController = TextEditingController();
-  final _diagnosisController = TextEditingController();
-  final _complaintController = TextEditingController();
-  final _notesController = TextEditingController();
-  final _treatmentController = TextEditingController();
-  final _nextPlanController = TextEditingController();
-
-  DateTime _visitDate = DateTime.now();
-  DateTime? _nextVisitDate;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadPatients();
-  }
-
-  Future<void> _loadPatients() async {
-    setState(() {
-      _isLoadingPatients = true;
-      _patientsError = null;
-    });
-
-    try {
-      final patients = await _repository.fetchPatients(
-        SurgeryDepartment.general,
-      );
-      if (!mounted) return;
-      setState(() {
-        _activePatients = patients;
-        _isLoadingPatients = false;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _patientsError = describeSupabaseError(error);
-        _isLoadingPatients = false;
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _patientNameController.dispose();
-    _patientIdController.dispose();
-    _diagnosisController.dispose();
-    _complaintController.dispose();
-    _notesController.dispose();
-    _treatmentController.dispose();
-    _nextPlanController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _pickVisitDate({required bool nextVisit}) async {
-    final initialDate = nextVisit ? (_nextVisitDate ?? _visitDate) : _visitDate;
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: initialDate,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
-    );
-
-    if (picked == null) return;
-
-    setState(() {
-      if (nextVisit) {
-        _nextVisitDate = picked;
-      } else {
-        _visitDate = picked;
-      }
-    });
-  }
-
-  void _submit() {
-    if (!_formKey.currentState!.validate()) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('تم حفظ بيانات المتابعة محليًا داخل النموذج.'),
-      ),
-    );
-  }
-
-  String _formatDate(DateTime value) {
-    final month = value.month.toString().padLeft(2, '0');
-    final day = value.day.toString().padLeft(2, '0');
-    return '${value.year}-$month-$day';
-  }
-
-  TextDirection _resolveTextDirection(
-    String text, {
-    TextDirection fallback = TextDirection.rtl,
-  }) {
-    for (final rune in text.runes) {
-      if (_isArabicRune(rune)) {
-        return TextDirection.rtl;
-      }
-      if (_isLatinRune(rune)) {
-        return TextDirection.ltr;
-      }
-    }
-    return fallback;
-  }
-
-  bool _isArabicRune(int rune) {
-    return (rune >= 0x0600 && rune <= 0x06FF) ||
-        (rune >= 0x0750 && rune <= 0x077F) ||
-        (rune >= 0x08A0 && rune <= 0x08FF) ||
-        (rune >= 0xFB50 && rune <= 0xFDFF) ||
-        (rune >= 0xFE70 && rune <= 0xFEFF);
-  }
-
-  bool _isLatinRune(int rune) {
-    return (rune >= 0x0041 && rune <= 0x005A) ||
-        (rune >= 0x0061 && rune <= 0x007A);
-  }
-
-  Future<void> _openPatientDetails(PatientRecord patient) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) =>
-            PatientProfilePage(patient: patient, repository: _repository),
-      ),
-    );
-    if (mounted) _loadPatients();
-  }
 
   Future<void> _addPatient() async {
     final patient = await Navigator.of(context).push<PatientRecord>(
@@ -176,85 +45,13 @@ class _PatientFollowUpSheetPageState extends State<PatientFollowUpSheetPage> {
     );
     if (patient == null || !mounted) return;
 
-    setState(() => _activePatients = [patient, ..._activePatients]);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('تم حفظ المريض في قسم الجراحة العامة.')),
     );
   }
 
-  Widget _buildPatientsSection() {
-    if (_isLoadingPatients && _activePatients.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 24),
-        child: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    if (_patientsError != null && _activePatients.isEmpty) {
-      return Column(
-        children: [
-          Text(
-            'تعذر تحميل المرضى: $_patientsError',
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Color(0xFF5B6B7B)),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _loadPatients,
-            icon: const Icon(Icons.refresh),
-            label: const Text('إعادة المحاولة'),
-          ),
-        ],
-      );
-    }
-
-    if (_activePatients.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 16),
-        child: Center(
-          child: Text(
-            'لا يوجد مرضى بعد. اضغط على إضافة مريض لتسجيل أول حالة.',
-            style: TextStyle(color: Color(0xFF5B6B7B)),
-          ),
-        ),
-      );
-    }
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        const spacing = 12.0;
-        final isSingleColumn = constraints.maxWidth < 520;
-        final cardWidth = isSingleColumn
-            ? constraints.maxWidth
-            : (constraints.maxWidth - spacing) / 2;
-
-        return Wrap(
-          spacing: spacing,
-          runSpacing: spacing,
-          children: _activePatients
-              .map(
-                (patient) => SizedBox(
-                  width: cardWidth,
-                  child: _PatientPreviewCard(
-                    patientName: patient.name,
-                    patientCode: patient.fileNumber,
-                    diagnosis: patient.diagnosis,
-                    statusLabel: patient.statusLabel,
-                    accentColor: patient.accentColor,
-                    onTap: () => _openPatientDetails(patient),
-                  ),
-                ),
-              )
-              .toList(),
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Directionality(
       textDirection: TextDirection.rtl,
       child: DefaultTabController(
@@ -270,44 +67,6 @@ class _PatientFollowUpSheetPageState extends State<PatientFollowUpSheetPage> {
               children: [
                 Container(
                   margin: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(22),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Color(0x14000000),
-                        blurRadius: 20,
-                        offset: Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: TextField(
-                    decoration: InputDecoration(
-                      hintText: 'ابحث باسم المريض أو رقم الملف',
-                      prefixIcon: const Icon(Icons.search_rounded),
-                      filled: true,
-                      fillColor: const Color(0xFFF7FAFD),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(18),
-                        borderSide: BorderSide.none,
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(18),
-                        borderSide: BorderSide.none,
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(18),
-                        borderSide: const BorderSide(
-                          color: Color(0xFF0E4D92),
-                          width: 1.4,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16),
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
                     color: Colors.white,
@@ -343,179 +102,11 @@ class _PatientFollowUpSheetPageState extends State<PatientFollowUpSheetPage> {
                 Expanded(
                   child: TabBarView(
                     children: [
-                      SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                        child: Form(
-                          key: _formKey,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      'المرضى الحاليون',
-                                      style: theme.textTheme.titleLarge
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                            color: const Color(0xFF16324F),
-                                          ),
-                                    ),
-                                  ),
-                                  IconButton(
-                                    tooltip: 'تحديث',
-                                    onPressed: _isLoadingPatients
-                                        ? null
-                                        : _loadPatients,
-                                    icon: const Icon(Icons.refresh),
-                                  ),
-                                  FilledButton.icon(
-                                    onPressed: _addPatient,
-                                    icon: const Icon(
-                                      Icons.person_add_alt_1_rounded,
-                                    ),
-                                    label: const Text('إضافة مريض'),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'عرض سريع للحالات الموجودة داخل الحجز النشط.',
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: const Color(0xFF5B6B7B),
-                                ),
-                              ),
-                              const SizedBox(height: 14),
-                              _buildPatientsSection(),
-                              const SizedBox(height: 18),
-                              Container(
-                                padding: const EdgeInsets.all(18),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(24),
-                                  boxShadow: const [
-                                    BoxShadow(
-                                      color: Color(0x12000000),
-                                      blurRadius: 18,
-                                      offset: Offset(0, 10),
-                                    ),
-                                  ],
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: _buildMetricCard(
-                                            title: 'الأسِرّة المشغولة',
-                                            value: '12',
-                                            color: const Color(0xFF0E4D92),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: _buildMetricCard(
-                                            title: 'في الانتظار',
-                                            value: '4',
-                                            color: const Color(0xFF1C8D73),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 16),
-                                    Text(
-                                      'تسجيل الحجز والمتابعة',
-                                      style: theme.textTheme.titleLarge
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                            color: const Color(0xFF16324F),
-                                          ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      'نموذج موحد لاستقبال الحالة، متابعة الخطة العلاجية، وتحديد موعد المراجعة التالية.',
-                                      style: theme.textTheme.bodyMedium
-                                          ?.copyWith(
-                                            color: const Color(0xFF5B6B7B),
-                                          ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 18),
-                              _buildTextField(
-                                controller: _patientNameController,
-                                label: 'اسم المريض',
-                                validatorMessage: 'من فضلك أدخل اسم المريض',
-                              ),
-                              const SizedBox(height: 12),
-                              _buildTextField(
-                                controller: _patientIdController,
-                                label: 'رقم الملف أو الكود',
-                              ),
-                              const SizedBox(height: 12),
-                              _buildDateField(
-                                label: 'تاريخ الزيارة',
-                                value: _formatDate(_visitDate),
-                                onTap: () => _pickVisitDate(nextVisit: false),
-                              ),
-                              const SizedBox(height: 12),
-                              _buildTextField(
-                                controller: _diagnosisController,
-                                label: 'التشخيص',
-                                validatorMessage: 'من فضلك أدخل التشخيص',
-                              ),
-                              const SizedBox(height: 12),
-                              _buildTextField(
-                                controller: _complaintController,
-                                label: 'الشكوى الحالية',
-                                maxLines: 3,
-                                validatorMessage: 'من فضلك أدخل الشكوى الحالية',
-                              ),
-                              const SizedBox(height: 12),
-                              _buildTextField(
-                                controller: _treatmentController,
-                                label: 'الخطة العلاجية / الأدوية',
-                                maxLines: 3,
-                              ),
-                              const SizedBox(height: 12),
-                              _buildTextField(
-                                controller: _notesController,
-                                label: 'ملاحظات الطبيب',
-                                maxLines: 4,
-                              ),
-                              const SizedBox(height: 12),
-                              _buildTextField(
-                                controller: _nextPlanController,
-                                label: 'خطة المتابعة القادمة',
-                                maxLines: 3,
-                              ),
-                              const SizedBox(height: 12),
-                              _buildDateField(
-                                label: 'موعد المراجعة القادم',
-                                value: _nextVisitDate == null
-                                    ? 'غير محدد'
-                                    : _formatDate(_nextVisitDate!),
-                                onTap: () => _pickVisitDate(nextVisit: true),
-                              ),
-                              const SizedBox(height: 20),
-                              FilledButton.icon(
-                                onPressed: _submit,
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: const Color(0xFF0E4D92),
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 16,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(18),
-                                  ),
-                                ),
-                                icon: const Icon(Icons.save_outlined),
-                                label: const Text('حفظ البيانات'),
-                              ),
-                            ],
-                          ),
+                      Center(
+                        child: FilledButton.icon(
+                          onPressed: _addPatient,
+                          icon: const Icon(Icons.person_add_alt_1_rounded),
+                          label: const Text('إضافة مريض'),
                         ),
                       ),
                       _buildTabPlaceholder(
@@ -589,229 +180,6 @@ class _PatientFollowUpSheetPageState extends State<PatientFollowUpSheetPage> {
                 description,
                 style: theme.textTheme.bodyMedium,
                 textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMetricCard({
-    required String title,
-    required String value,
-    required Color color,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: color.withValues(alpha: 0.18)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            value,
-            style: TextStyle(
-              color: color,
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            title,
-            style: const TextStyle(
-              color: Color(0xFF45607B),
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String label,
-    String? validatorMessage,
-    int maxLines = 1,
-    TextDirection fallbackDirection = TextDirection.rtl,
-  }) {
-    return ValueListenableBuilder<TextEditingValue>(
-      valueListenable: controller,
-      builder: (context, value, child) {
-        final textDirection = _resolveTextDirection(
-          value.text,
-          fallback: fallbackDirection,
-        );
-
-        return TextFormField(
-          controller: controller,
-          maxLines: maxLines,
-          textDirection: textDirection,
-          textAlign: textDirection == TextDirection.rtl
-              ? TextAlign.right
-              : TextAlign.left,
-          decoration: InputDecoration(
-            labelText: label,
-            filled: true,
-            fillColor: Colors.white,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFD9E1EA)),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFFD9E1EA)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(
-                color: Color(0xFF0E4D92),
-                width: 1.4,
-              ),
-            ),
-          ),
-          validator: validatorMessage == null
-              ? null
-              : (fieldValue) {
-                  if (fieldValue == null || fieldValue.trim().isEmpty) {
-                    return validatorMessage;
-                  }
-                  return null;
-                },
-        );
-      },
-    );
-  }
-
-  Widget _buildDateField({
-    required String label,
-    required String value,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: InputDecorator(
-        decoration: InputDecoration(
-          labelText: label,
-          filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: Color(0xFFD9E1EA)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: Color(0xFFD9E1EA)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: Color(0xFF0E4D92), width: 1.4),
-          ),
-          suffixIcon: const Icon(Icons.calendar_month_outlined),
-        ),
-        child: Text(value),
-      ),
-    );
-  }
-}
-
-class _PatientPreviewCard extends StatelessWidget {
-  final String patientName;
-  final String patientCode;
-  final String diagnosis;
-  final String statusLabel;
-  final Color accentColor;
-  final VoidCallback onTap;
-
-  const _PatientPreviewCard({
-    required this.patientName,
-    required this.patientCode,
-    required this.diagnosis,
-    required this.statusLabel,
-    required this.accentColor,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Ink(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: accentColor.withValues(alpha: 0.16)),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x12000000),
-                blurRadius: 16,
-                offset: Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                height: 40,
-                width: 40,
-                decoration: BoxDecoration(
-                  color: accentColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(Icons.person_outline, color: accentColor),
-              ),
-              const SizedBox(height: 14),
-              Text(
-                patientName,
-                style: const TextStyle(
-                  color: Color(0xFF16324F),
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                patientCode,
-                style: const TextStyle(
-                  color: Color(0xFF6B7B8C),
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                diagnosis,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Color(0xFF45607B), fontSize: 12),
-              ),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: accentColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  statusLabel,
-                  style: TextStyle(
-                    color: accentColor,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
               ),
             ],
           ),
@@ -1146,6 +514,9 @@ class _PatientDetailsPageState extends State<PatientDetailsPage> {
   final List<String> _customOperationHistoryOptions = [];
   final List<String> _customLabOptions = [];
   final List<String> _customImagingOptions = [];
+  final List<String> _customDiagnosisOptions = [];
+  final List<String> _customDoctorOptions = [];
+  final List<String> _customConsciousLevelOptions = [];
   List<String> _selectedSigns = [];
   List<String> _selectedSymptoms = [];
   List<String> _selectedPastHistory = [];
@@ -1163,7 +534,6 @@ class _PatientDetailsPageState extends State<PatientDetailsPage> {
   String? _selectedLabToAdd;
   String? _selectedImagingToAdd;
   late String _selectedDoctor;
-  late final List<String> _doctorChoices;
   String _selectedConsciousLevel = _consciousLevelOptions.first;
   Uint8List? _selectedImageBytes;
   String? _selectedImageName;
@@ -1187,11 +557,6 @@ class _PatientDetailsPageState extends State<PatientDetailsPage> {
     _diagnosisController = TextEditingController(text: patient.diagnosis);
     _selectedDiagnosis = patient.diagnosis;
 
-    _doctorChoices = [
-      if (patient.doctor.isNotEmpty && !_doctorOptions.contains(patient.doctor))
-        patient.doctor,
-      ..._doctorOptions,
-    ];
     _selectedDoctor = patient.doctor.isNotEmpty
         ? patient.doctor
         : _doctorOptions.first;
@@ -1256,6 +621,68 @@ class _PatientDetailsPageState extends State<PatientDetailsPage> {
     if (_photoPath != null) {
       _loadExistingPhoto(_photoPath!);
     }
+
+    _syncStoredOptions();
+    CustomFieldOptions.instance.load().then((_) {
+      if (!mounted) return;
+      setState(_syncStoredOptions);
+    });
+  }
+
+  /// Pulls items added earlier (by any patient form) into this form's lists.
+  void _syncStoredOptions() {
+    final store = CustomFieldOptions.instance;
+    void merge(String field, List<String> base, List<String> custom) {
+      for (final value in store.of(field)) {
+        if (!base.contains(value) && !custom.contains(value)) {
+          custom.add(value);
+        }
+      }
+    }
+
+    merge('sign', _signOptions, _customSignOptions);
+    merge('symptom', _symptomOptions, _customSymptomOptions);
+    merge('past_history', _pastHistoryOptions, _customPastHistoryOptions);
+    merge(
+      'operation_history',
+      _operationHistoryOptions,
+      _customOperationHistoryOptions,
+    );
+    merge('lab', _labOptions, _customLabOptions);
+    merge('imaging', _imagingOptions, _customImagingOptions);
+    merge('diagnosis', _surgicalDiagnosisOptions, _customDiagnosisOptions);
+    merge('doctor', _doctorOptions, _customDoctorOptions);
+    merge(
+      'conscious_level',
+      _consciousLevelOptions,
+      _customConsciousLevelOptions,
+    );
+  }
+
+  /// Keeps a newly added item in this form and saves it for later patients.
+  void _rememberCustomOption(
+    String field,
+    List<String> customOptions,
+    String option,
+  ) {
+    if (!customOptions.contains(option)) customOptions.add(option);
+    CustomFieldOptions.instance.add(field, option);
+  }
+
+  List<String> _optionsWithCustom(
+    List<String> base,
+    List<String> custom, [
+    String? current,
+  ]) {
+    return [
+      if (current != null &&
+          current.isNotEmpty &&
+          !base.contains(current) &&
+          !custom.contains(current))
+        current,
+      ...base,
+      ...custom,
+    ];
   }
 
   void _restoreCustomOptions(
@@ -1690,10 +1117,13 @@ class _PatientDetailsPageState extends State<PatientDetailsPage> {
       _rrController.text = reading.rr;
       _spo2Controller.text = reading.spo2;
       _tempController.text = reading.temp;
-      _selectedConsciousLevel =
-          _consciousLevelOptions.contains(reading.consciousLevel)
+      _selectedConsciousLevel = reading.consciousLevel.isNotEmpty
           ? reading.consciousLevel
           : _consciousLevelOptions.first;
+      if (!_consciousLevelOptions.contains(_selectedConsciousLevel) &&
+          !_customConsciousLevelOptions.contains(_selectedConsciousLevel)) {
+        _customConsciousLevelOptions.add(_selectedConsciousLevel);
+      }
     });
   }
 
@@ -1939,11 +1369,20 @@ class _PatientDetailsPageState extends State<PatientDetailsPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final diagnosisOptions =
-        _selectedDiagnosis.isEmpty ||
-            _surgicalDiagnosisOptions.contains(_selectedDiagnosis)
-        ? _surgicalDiagnosisOptions
-        : [_selectedDiagnosis, ..._surgicalDiagnosisOptions];
+    final diagnosisOptions = _optionsWithCustom(
+      _surgicalDiagnosisOptions,
+      _customDiagnosisOptions,
+      _selectedDiagnosis,
+    );
+    final doctorChoices = _optionsWithCustom(
+      _doctorOptions,
+      _customDoctorOptions,
+      _selectedDoctor,
+    );
+    final consciousLevelChoices = _optionsWithCustom(
+      _consciousLevelOptions,
+      _customConsciousLevelOptions,
+    );
     final labOptions = _mergeOptions(_labOptions, _customLabOptions);
     final imagingOptions = _mergeOptions(
       _imagingOptions,
@@ -2065,7 +1504,14 @@ class _PatientDetailsPageState extends State<PatientDetailsPage> {
                           _PatientDropdownField(
                             label: 'الطبيب المعالج',
                             value: _selectedDoctor,
-                            options: _doctorChoices,
+                            options: doctorChoices,
+                            onAddOption: (option) => setState(() {
+                              _rememberCustomOption(
+                                'doctor',
+                                _customDoctorOptions,
+                                option,
+                              );
+                            }),
                             fillColor: const Color(0xFFF1FBF5),
                             borderColor: const Color(0xFF6FC08D),
                             contentPadding: const EdgeInsets.symmetric(
@@ -2123,6 +1569,13 @@ class _PatientDetailsPageState extends State<PatientDetailsPage> {
                             ? null
                             : _selectedDiagnosis,
                         options: diagnosisOptions,
+                        onAddOption: (option) => setState(() {
+                          _rememberCustomOption(
+                            'diagnosis',
+                            _customDiagnosisOptions,
+                            option,
+                          );
+                        }),
                         onChanged: (value) {
                           if (value == null) return;
                           setState(() {
@@ -2174,7 +1627,11 @@ class _PatientDetailsPageState extends State<PatientDetailsPage> {
                                   selectedValues: _selectedSigns,
                                   customOptions: _customSignOptions,
                                   onCustomOptionAdded: (option) {
-                                    _customSignOptions.add(option);
+                                    _rememberCustomOption(
+                                      'sign',
+                                      _customSignOptions,
+                                      option,
+                                    );
                                   },
                                   onChanged: (values) {
                                     _selectedSigns = values;
@@ -2199,7 +1656,11 @@ class _PatientDetailsPageState extends State<PatientDetailsPage> {
                                   selectedValues: _selectedSymptoms,
                                   customOptions: _customSymptomOptions,
                                   onCustomOptionAdded: (option) {
-                                    _customSymptomOptions.add(option);
+                                    _rememberCustomOption(
+                                      'symptom',
+                                      _customSymptomOptions,
+                                      option,
+                                    );
                                   },
                                   onChanged: (values) {
                                     _selectedSymptoms = values;
@@ -2312,7 +1773,14 @@ class _PatientDetailsPageState extends State<PatientDetailsPage> {
                         child: _PatientDropdownField(
                           label: 'Conscious level',
                           value: _selectedConsciousLevel,
-                          options: _consciousLevelOptions,
+                          options: consciousLevelChoices,
+                          onAddOption: (option) => setState(() {
+                            _rememberCustomOption(
+                              'conscious_level',
+                              _customConsciousLevelOptions,
+                              option,
+                            );
+                          }),
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 10,
                             vertical: 12,
@@ -2391,7 +1859,11 @@ class _PatientDetailsPageState extends State<PatientDetailsPage> {
                                   selectedValues: _selectedPastHistory,
                                   customOptions: _customPastHistoryOptions,
                                   onCustomOptionAdded: (option) {
-                                    _customPastHistoryOptions.add(option);
+                                    _rememberCustomOption(
+                                      'past_history',
+                                      _customPastHistoryOptions,
+                                      option,
+                                    );
                                   },
                                   onChanged: (values) {
                                     _selectedPastHistory = values;
@@ -2416,7 +1888,11 @@ class _PatientDetailsPageState extends State<PatientDetailsPage> {
                                   selectedValues: _selectedOperationHistory,
                                   customOptions: _customOperationHistoryOptions,
                                   onCustomOptionAdded: (option) {
-                                    _customOperationHistoryOptions.add(option);
+                                    _rememberCustomOption(
+                                      'operation_history',
+                                      _customOperationHistoryOptions,
+                                      option,
+                                    );
                                   },
                                   onChanged: (values) {
                                     _selectedOperationHistory = values;
@@ -2519,7 +1995,11 @@ class _PatientDetailsPageState extends State<PatientDetailsPage> {
                               selectedValues: const [],
                               customOptions: _customLabOptions,
                               onCustomOptionAdded: (option) {
-                                _customLabOptions.add(option);
+                                _rememberCustomOption(
+                                  'lab',
+                                  _customLabOptions,
+                                  option,
+                                );
                               },
                               onChanged: (values) {
                                 for (final value in values) {
@@ -2705,7 +2185,11 @@ class _PatientDetailsPageState extends State<PatientDetailsPage> {
                               selectedValues: const [],
                               customOptions: _customImagingOptions,
                               onCustomOptionAdded: (option) {
-                                _customImagingOptions.add(option);
+                                _rememberCustomOption(
+                                  'imaging',
+                                  _customImagingOptions,
+                                  option,
+                                );
                               },
                               onChanged: (values) {
                                 for (final value in values) {
@@ -3114,11 +2598,15 @@ class _PatientDetailsField extends StatelessWidget {
   }
 }
 
-class _PatientDropdownField extends StatelessWidget {
+class _PatientDropdownField extends StatefulWidget {
   final String label;
   final String? value;
   final List<String> options;
   final ValueChanged<String?> onChanged;
+
+  /// When set, the list ends with an "add new item" entry; the typed item is
+  /// passed here and then selected.
+  final ValueChanged<String>? onAddOption;
   final Color? fillColor;
   final Color? borderColor;
   final EdgeInsetsGeometry? contentPadding;
@@ -3129,6 +2617,7 @@ class _PatientDropdownField extends StatelessWidget {
     required this.value,
     required this.options,
     required this.onChanged,
+    this.onAddOption,
     this.fillColor,
     this.borderColor,
     this.contentPadding,
@@ -3136,15 +2625,90 @@ class _PatientDropdownField extends StatelessWidget {
   });
 
   @override
+  State<_PatientDropdownField> createState() => _PatientDropdownFieldState();
+}
+
+class _PatientDropdownFieldState extends State<_PatientDropdownField> {
+  static const String _addNewValue = '\u0000add_new';
+
+  // Bumped to rebuild the form field when it must drop the "add new" pick.
+  int _generation = 0;
+
+  List<String> get options => widget.options;
+  TextStyle? get textStyle => widget.textStyle;
+
+  Future<void> _handleChanged(String? selected) async {
+    if (selected != _addNewValue) {
+      widget.onChanged(selected);
+      return;
+    }
+    final newOption = await _askForNewOption();
+    if (!mounted) return;
+    setState(() => _generation++);
+    if (newOption == null) return;
+    final existing = options.where(
+      (option) => option.toLowerCase() == newOption.toLowerCase(),
+    );
+    if (existing.isNotEmpty) {
+      widget.onChanged(existing.first);
+      return;
+    }
+    widget.onAddOption?.call(newOption);
+    widget.onChanged(newOption);
+  }
+
+  Future<String?> _askForNewOption() {
+    return showDialog<String>(
+      context: context,
+      builder: (_) => _NewOptionDialog(label: widget.label),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final fillColor = widget.fillColor;
+    final borderColor = widget.borderColor;
+    final canAdd = widget.onAddOption != null;
     return DropdownButtonFormField<String>(
-      initialValue: value,
+      key: ValueKey('$_generation|${widget.value}|${options.length}'),
+      initialValue: widget.value,
       isExpanded: true,
       icon: const Icon(Icons.keyboard_arrow_down_rounded),
-      items: options
-          .map(
-            (option) => DropdownMenuItem<String>(
-              value: option,
+      items: [
+        ...options.map(
+          (option) => DropdownMenuItem<String>(
+            value: option,
+            child: Text(
+              option,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: textStyle,
+            ),
+          ),
+        ),
+        if (canAdd)
+          DropdownMenuItem<String>(
+            value: _addNewValue,
+            child: Row(
+              children: [
+                const Icon(Icons.add_circle_outline, size: 18),
+                const SizedBox(width: 6),
+                Text(
+                  'إضافة عنصر جديد',
+                  style: (textStyle ?? const TextStyle()).copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFF0E4D92),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+      selectedItemBuilder: (context) {
+        return [
+          ...options.map(
+            (option) => Align(
+              alignment: Alignment.centerLeft,
               child: Text(
                 option,
                 maxLines: 1,
@@ -3152,31 +2716,18 @@ class _PatientDropdownField extends StatelessWidget {
                 style: textStyle,
               ),
             ),
-          )
-          .toList(),
-      selectedItemBuilder: (context) {
-        return options
-            .map(
-              (option) => Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  option,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: textStyle,
-                ),
-              ),
-            )
-            .toList();
+          ),
+          if (canAdd) const SizedBox.shrink(),
+        ];
       },
-      onChanged: onChanged,
+      onChanged: _handleChanged,
       decoration: InputDecoration(
-        labelText: label,
+        labelText: widget.label,
         filled: true,
         fillColor: fillColor ?? const Color(0xFFFDFEFF),
         isDense: true,
         contentPadding:
-            contentPadding ??
+            widget.contentPadding ??
             const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
@@ -3193,6 +2744,57 @@ class _PatientDropdownField extends StatelessWidget {
             width: 1.4,
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _NewOptionDialog extends StatefulWidget {
+  final String label;
+
+  const _NewOptionDialog({required this.label});
+
+  @override
+  State<_NewOptionDialog> createState() => _NewOptionDialogState();
+}
+
+class _NewOptionDialogState extends State<_NewOptionDialog> {
+  final TextEditingController _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final text = _controller.text.trim();
+    Navigator.of(context).pop(text.isEmpty ? null : text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        title: Text('إضافة ${widget.label}'),
+        content: TextField(
+          controller: _controller,
+          autofocus: true,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _submit(),
+          decoration: const InputDecoration(
+            labelText: 'اسم العنصر الجديد',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(onPressed: _submit, child: const Text('إضافة')),
+        ],
       ),
     );
   }

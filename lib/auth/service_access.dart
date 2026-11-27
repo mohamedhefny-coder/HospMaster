@@ -104,6 +104,48 @@ class ServiceAccessEntry {
   final DateTime? requestedAt;
 }
 
+/// A registered account as listed for admins.
+class RegisteredUser {
+  const RegisteredUser({
+    required this.userId,
+    required this.email,
+    this.lastSeen,
+  });
+
+  factory RegisteredUser.fromRow(Map<String, dynamic> row) {
+    return RegisteredUser(
+      userId: row['user_id'] as String,
+      email: (row['email'] as String? ?? '').toLowerCase(),
+      lastSeen: DateTime.tryParse(row['last_seen_at'] as String? ?? ''),
+    );
+  }
+
+  final String userId;
+  final String email;
+  final DateTime? lastSeen;
+}
+
+/// Human readable "last seen" text, e.g. "منذ 5 دقيقة" / "5 min ago".
+String formatLastSeen(DateTime? lastSeen, bool isArabic, {DateTime? now}) {
+  if (lastSeen == null) return isArabic ? 'لم يظهر بعد' : 'Never seen';
+  final diff = (now ?? DateTime.now()).difference(lastSeen);
+  if (diff.inMinutes < 1) return isArabic ? 'متصل الآن' : 'Online now';
+  if (diff.inMinutes < 60) {
+    return isArabic
+        ? 'منذ ${diff.inMinutes} دقيقة'
+        : '${diff.inMinutes} min ago';
+  }
+  if (diff.inHours < 24) {
+    return isArabic ? 'منذ ${diff.inHours} ساعة' : '${diff.inHours} h ago';
+  }
+  if (diff.inDays < 30) {
+    return isArabic ? 'منذ ${diff.inDays} يوم' : '${diff.inDays} d ago';
+  }
+  final local = lastSeen.toLocal();
+  String two(int v) => v.toString().padLeft(2, '0');
+  return '${local.year}-${two(local.month)}-${two(local.day)}';
+}
+
 /// What the signed-in user is allowed to open.
 class ServiceAccess {
   const ServiceAccess({required this.isAdmin, required this.statuses});
@@ -183,6 +225,24 @@ class ServiceAccessRepository {
 
   /// Admin only (enforced by RLS).
   Future<List<ServiceAccessEntry>> listAll() => _select();
+
+  /// Admin only: every registered account with its last activity.
+  Future<List<RegisteredUser>> listUsers() async {
+    final rows = await _client.rpc('admin_list_users') as List<dynamic>;
+    return [
+      for (final row in rows)
+        RegisteredUser.fromRow(Map<String, dynamic>.from(row as Map)),
+    ];
+  }
+
+  /// Stamps the signed-in user's last activity. Failures are ignored so a
+  /// missing migration never blocks the app.
+  Future<void> touchLastSeen() async {
+    if (_user == null) return;
+    try {
+      await _client.rpc('touch_last_seen');
+    } catch (_) {}
+  }
 
   Future<void> setStatus(String id, AccessStatus status) async {
     await _client

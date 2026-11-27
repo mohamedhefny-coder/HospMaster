@@ -89,6 +89,13 @@ approves them. Run, in the SQL editor:
 3. [`20261118_service_access.sql`](supabase/migrations/20261118_service_access.sql)
    creates `service_access`, the `is_app_admin()` / `has_service()` helpers and
    replaces the open `anon` policies above with per-service policies.
+4. [`20261127_admin_user_directory.sql`](supabase/migrations/20261127_admin_user_directory.sql)
+   adds `admin_list_users()` (registered e-mails for the admin's "Add user"
+   picker) and `touch_last_seen()` (the "last seen" shown per subscriber in
+   each service).
+5. [`20261127_custom_field_options.sql`](supabase/migrations/20261127_custom_field_options.sql)
+   stores items added to the surgery patient form lists (diagnosis, doctor,
+   signs, labs, ...) so they appear for every later patient.
 
 Create the first admin by flagging an existing account:
 

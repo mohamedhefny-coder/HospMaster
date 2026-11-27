@@ -62,6 +62,7 @@ class _SubscriberGateState extends State<SubscriberGate> {
   ServiceAccess? _access;
   Object? _error;
   StreamSubscription<AuthState>? _authSub;
+  Timer? _presenceTimer;
 
   String tr(String ar, String en) => widget.isArabic ? ar : en;
 
@@ -76,12 +77,19 @@ class _SubscriberGateState extends State<SubscriberGate> {
         );
       }
     });
+    final repository = ServiceAccessRepository();
+    repository.touchLastSeen();
+    _presenceTimer = Timer.periodic(
+      const Duration(minutes: 5),
+      (_) => repository.touchLastSeen(),
+    );
     _load();
   }
 
   @override
   void dispose() {
     _authSub?.cancel();
+    _presenceTimer?.cancel();
     super.dispose();
   }
 

@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:hospmaster/main.dart';
 import 'package:hospmaster/surgery/oncology_surgery_page.dart';
-import 'package:hospmaster/surgery/patient_record.dart';
+import 'package:hospmaster/surgery/patient_follow_up_sheet_page.dart';
 import 'package:hospmaster/surgery/patient_repository.dart';
 
 Future<void> pumpDashboard(WidgetTester tester) async {
@@ -28,6 +28,76 @@ void main() {
     expect(find.text('صباح الخير، د. أحمد'), findsNothing);
     expect(find.text('إليك ملخص العمل اليوم'), findsNothing);
     expect(find.text('مركز التحكم الإداري'), findsOneWidget);
+  });
+
+  testWidgets(
+    'general surgery active booking shows only the add patient action',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PatientFollowUpSheetPage(
+            repository: DemoSurgeryPatientRepository(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('إضافة مريض'), findsOneWidget);
+      expect(find.text('ابحث باسم المريض أو رقم الملف'), findsNothing);
+      expect(find.text('المرضى الحاليون'), findsNothing);
+      expect(find.byType(TextFormField), findsNothing);
+
+      await tester.tap(find.text('إضافة مريض'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(PatientDetailsPage), findsOneWidget);
+    },
+  );
+
+  testWidgets('a diagnosis added in the patient form shows in later forms', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    Future<void> openForm() async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PatientDetailsPage(
+            isNew: true,
+            repository: DemoSurgeryPatientRepository(),
+            patient: const PatientRecord(
+              department: SurgeryDepartment.general,
+              name: '',
+              fileNumber: '',
+              roomNumber: '',
+              diagnosis: '',
+              statusLabel: 'جديد',
+              accentColor: Color(0xFF1E6FD9),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    await openForm();
+    await tester.tap(find.text('التشخيص'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('إضافة عنصر جديد').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, 'Rare diagnosis X');
+    await tester.tap(find.text('إضافة').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Rare diagnosis X'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await openForm();
+    await tester.tap(find.text('التشخيص'));
+    await tester.pumpAndSettle();
+    expect(find.text('Rare diagnosis X'), findsOneWidget);
   });
 
   testWidgets('adds an obstetrics patient from the clinic manager', (

@@ -73,6 +73,26 @@ void main() {
     });
   });
 
+  group('formatLastSeen', () {
+    final now = DateTime.utc(2026, 11, 27, 12);
+
+    test('shows relative time and a never-seen fallback', () {
+      expect(formatLastSeen(null, false, now: now), 'Never seen');
+      expect(
+        formatLastSeen(
+          now.subtract(const Duration(minutes: 5)),
+          false,
+          now: now,
+        ),
+        '5 min ago',
+      );
+      expect(
+        formatLastSeen(now.subtract(const Duration(hours: 3)), true, now: now),
+        'منذ 3 ساعة',
+      );
+    });
+  });
+
   testWidgets('five quick taps on the logo open the protected admin panel', (
     tester,
   ) async {

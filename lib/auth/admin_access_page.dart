@@ -17,6 +17,7 @@ class AdminAccessPage extends StatefulWidget {
 class _AdminAccessPageState extends State<AdminAccessPage> {
   final _repository = ServiceAccessRepository();
   List<ServiceAccessEntry>? _entries;
+  List<RegisteredUser> _registered = const [];
   String? _error;
   bool _busy = false;
 
@@ -25,15 +26,23 @@ class _AdminAccessPageState extends State<AdminAccessPage> {
   @override
   void initState() {
     super.initState();
+    _repository.touchLastSeen();
     _load();
   }
 
   Future<void> _load() async {
     try {
       final entries = await _repository.listAll();
+      var registered = _registered;
+      try {
+        registered = await _repository.listUsers();
+      } catch (_) {
+        // The directory is optional until 20261127_admin_user_directory.sql runs.
+      }
       if (mounted) {
         setState(() {
           _entries = entries;
+          _registered = registered;
           _error = null;
         });
       }
@@ -42,6 +51,13 @@ class _AdminAccessPageState extends State<AdminAccessPage> {
         setState(() => _error = accessErrorMessage(e, widget.isArabic));
       }
     }
+  }
+
+  DateTime? _lastSeen(String email) {
+    for (final user in _registered) {
+      if (user.email == email.toLowerCase()) return user.lastSeen;
+    }
+    return null;
   }
 
   Future<bool> _run(Future<void> Function() action) async {
@@ -65,7 +81,10 @@ class _AdminAccessPageState extends State<AdminAccessPage> {
   Future<void> _addUser() async {
     final user = await showDialog<_NewUser>(
       context: context,
-      builder: (_) => _AddUserDialog(isArabic: widget.isArabic),
+      builder: (_) => _AddUserDialog(
+        isArabic: widget.isArabic,
+        emails: [for (final user in _registered) user.email],
+      ),
     );
     if (user == null) return;
     final ok = await _run(() => _repository.grant(user.email, user.services));
@@ -97,7 +116,7 @@ class _AdminAccessPageState extends State<AdminAccessPage> {
     return Directionality(
       textDirection: widget.isArabic ? TextDirection.rtl : TextDirection.ltr,
       child: DefaultTabController(
-        length: 2,
+        length: 3,
         child: Scaffold(
           appBar: AppBar(
             title: Text(tr('المستخدمون والطلبات', 'Users & requests')),
@@ -117,6 +136,7 @@ class _AdminAccessPageState extends State<AdminAccessPage> {
               tabs: [
                 Tab(text: '${tr('الطلبات', 'Requests')} (${pending.length})'),
                 Tab(text: tr('المستخدمون', 'Users')),
+                Tab(text: tr('المشتركون بالخدمات', 'Subscribers')),
               ],
             ),
           ),
@@ -135,7 +155,11 @@ class _AdminAccessPageState extends State<AdminAccessPage> {
               : entries == null
               ? const Center(child: CircularProgressIndicator())
               : TabBarView(
-                  children: [_requestsTab(pending), _usersTab(byEmail)],
+                  children: [
+                    _requestsTab(pending),
+                    _usersTab(byEmail),
+                    _subscribersTab(entries),
+                  ],
                 ),
         ),
       ),
@@ -217,6 +241,13 @@ class _AdminAccessPageState extends State<AdminAccessPage> {
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      '${tr('آخر ظهور', 'Last seen')}: ${formatLastSeen(_lastSeen(email), widget.isArabic)}',
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ),
                   for (final entry in byEmail[email]!)
                     ListTile(
                       dense: true,
@@ -279,6 +310,48 @@ class _AdminAccessPageState extends State<AdminAccessPage> {
       ],
     );
   }
+
+  Widget _subscribersTab(List<ServiceAccessEntry> entries) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
+      children: [
+        for (final service in HospService.values)
+          _serviceCard(service, [
+            for (final entry in entries)
+              if (entry.service == service &&
+                  entry.status == AccessStatus.approved)
+                entry,
+          ]),
+      ],
+    );
+  }
+
+  Widget _serviceCard(HospService service, List<ServiceAccessEntry> members) {
+    return Card(
+      child: ExpansionTile(
+        leading: Icon(service.icon),
+        title: Text(service.label(widget.isArabic)),
+        subtitle: Text(
+          '${tr('عدد المشتركين', 'Subscribers')}: ${members.length}',
+        ),
+        children: [
+          if (members.isEmpty)
+            ListTile(
+              dense: true,
+              title: Text(tr('لا يوجد مشتركون', 'No subscribers')),
+            ),
+          for (final entry in members)
+            ListTile(
+              dense: true,
+              title: Text(entry.email, textDirection: TextDirection.ltr),
+              subtitle: Text(
+                '${tr('آخر ظهور', 'Last seen')}: ${formatLastSeen(_lastSeen(entry.email), widget.isArabic)}',
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class _NewUser {
@@ -289,9 +362,10 @@ class _NewUser {
 }
 
 class _AddUserDialog extends StatefulWidget {
-  const _AddUserDialog({required this.isArabic});
+  const _AddUserDialog({required this.isArabic, required this.emails});
 
   final bool isArabic;
+  final List<String> emails;
 
   @override
   State<_AddUserDialog> createState() => _AddUserDialogState();
@@ -350,15 +424,33 @@ class _AddUserDialogState extends State<_AddUserDialog> {
                 style: const TextStyle(fontSize: 12),
               ),
               const SizedBox(height: 12),
-              TextField(
-                controller: _email,
-                keyboardType: TextInputType.emailAddress,
-                textDirection: TextDirection.ltr,
-                decoration: InputDecoration(
-                  labelText: tr('البريد الإلكتروني', 'Email'),
-                  border: const OutlineInputBorder(),
+              if (widget.emails.isEmpty)
+                TextField(
+                  controller: _email,
+                  keyboardType: TextInputType.emailAddress,
+                  textDirection: TextDirection.ltr,
+                  decoration: InputDecoration(
+                    labelText: tr('البريد الإلكتروني', 'Email'),
+                    border: const OutlineInputBorder(),
+                  ),
+                )
+              else
+                DropdownMenu<String>(
+                  controller: _email,
+                  expandedInsets: EdgeInsets.zero,
+                  enableFilter: true,
+                  requestFocusOnTap: true,
+                  menuHeight: 240,
+                  label: Text(tr('البريد الإلكتروني', 'Email')),
+                  hintText: tr(
+                    'اختر بريدًا مسجلًا أو اكتب بريدًا جديدًا',
+                    'Pick a registered email or type a new one',
+                  ),
+                  dropdownMenuEntries: [
+                    for (final email in widget.emails)
+                      DropdownMenuEntry(value: email, label: email),
+                  ],
                 ),
-              ),
               const SizedBox(height: 8),
               for (final service in HospService.values)
                 CheckboxListTile(
